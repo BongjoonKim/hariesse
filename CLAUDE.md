@@ -5,7 +5,8 @@
 
 > 📌 **세션을 이어받는 중이라면 [HANDOFF.md](./HANDOFF.md)를 먼저 읽을 것.**
 > 현재 상태, 검증 결과, 다음 실행할 명령어, 결정 이력이 모두 거기 있다.
-> **요약: 코드·검증 완료 / 아직 미배포. 다음 할 일은 `cdk bootstrap` → `cdk deploy --all`.**
+> **요약: 2026-07-20 배포 완료 + E2E 검증 완료(Telegram 다이제스트 + Notion 8건).**
+> **다음 증분은 Feedback Lambda(Telegram 버튼) — HANDOFF §7 로드맵 참고.**
 
 ## 현재 상태: Phase 1 워킹 스켈레톤
 `Collection → Curation → Delivery` 한 줄기가 끝까지 동작.

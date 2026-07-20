@@ -1,6 +1,15 @@
 # hariesse — 인수인계 (2026-07-20)
 
-새 세션에서 이 프로젝트를 이어받기 위한 문서. **다음 할 일은 "배포"** 한 가지다.
+새 세션에서 이 프로젝트를 이어받기 위한 문서.
+
+> ✅ **2026-07-20 배포 완료 + E2E 성공.** §4의 배포 절차는 전부 실행됐다.
+> 실제 파이프라인 1회 실행으로 Telegram 다이제스트 전송 + Notion 8건 아카이브 확인.
+> 배포 중 수정한 것 (아래 §8 함정 메모에도 반영):
+> - SSM `/hariesse/telegram-chat-id`: 봇 자신의 ID(8657904581)로 잘못 들어가 있어 403 발생 → 실제 대화방 ID `8500033546`으로 교체.
+> - SSM `/hariesse/bedrock-model-id`: 기본값 `apac.claude-sonnet-4`가 Legacy 접근 거부 → `global.anthropic.claude-sonnet-4-5-20250929-v1:0`으로 설정.
+> - 주의: `config.ts`가 SSM을 콜드스타트에 캐시하므로, SSM 값 변경 후에는 Lambda 설정을 건드려 콜드스타트를 강제해야 반영된다.
+>
+> **다음 할 일은 §7 로드맵의 "다음 증분"(Feedback Lambda + Telegram 버튼)이다.**
 
 ---
 
