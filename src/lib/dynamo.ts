@@ -8,7 +8,8 @@ import {
   QueryCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { DEFAULTS } from './constants';
-import type { Article, Source, Profile } from './types';
+import { clampWeight, type FeedbackAction } from '../domain/feedback';
+import type { Article, ArticleStatus, Source, Profile } from './types';
 
 const region = process.env.AWS_REGION ?? DEFAULTS.BEDROCK_REGION;
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
@@ -137,6 +138,98 @@ export async function markDelivered(
       ExpressionAttributeValues: { ':at': at, ':slot': slot },
     })
   );
+}
+
+// ---- Feedback ----
+
+export async function getSource(table: string, siteId: string): Promise<Source | undefined> {
+  const res = await doc.send(new GetCommand({ TableName: table, Key: { siteId } }));
+  return res.Item as Source | undefined;
+}
+
+/**
+ * 피드백 1회 반영 (idempotent). `${action}FeedbackAt` 마커가 이미 있으면 false.
+ * 글이 TTL로 사라진 경우에도 false (ghost 아이템 생성 방지).
+ */
+export async function markArticleFeedbackOnce(
+  table: string,
+  articleId: string,
+  action: FeedbackAction,
+  fields: { status?: ArticleStatus; liked?: boolean; nadelivCandidate?: boolean },
+  at: string
+): Promise<boolean> {
+  const sets = ['#flag = :at'];
+  const names: Record<string, string> = { '#flag': `${action}FeedbackAt` };
+  const values: Record<string, unknown> = { ':at': at };
+  if (fields.status !== undefined) {
+    sets.push('#s = :st');
+    names['#s'] = 'status';
+    values[':st'] = fields.status;
+  }
+  if (fields.liked !== undefined) {
+    sets.push('liked = :lk');
+    values[':lk'] = fields.liked;
+  }
+  if (fields.nadelivCandidate !== undefined) {
+    sets.push('nadelivCandidate = :nc');
+    values[':nc'] = fields.nadelivCandidate;
+  }
+  try {
+    await doc.send(
+      new UpdateCommand({
+        TableName: table,
+        Key: { articleId },
+        UpdateExpression: `SET ${sets.join(', ')}`,
+        ConditionExpression: 'attribute_exists(articleId) AND attribute_not_exists(#flag)',
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+      })
+    );
+    return true;
+  } catch (err) {
+    if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return false;
+    throw err;
+  }
+}
+
+/** 소스 가중치/카운터 조정. weight는 read-modify-write로 클램프. */
+export async function adjustSourceFeedback(
+  table: string,
+  siteId: string,
+  deltas: { weightDelta: number; likeCountDelta: number; skipCountDelta: number }
+): Promise<void> {
+  const source = await getSource(table, siteId);
+  if (!source) return;
+  await doc.send(
+    new UpdateCommand({
+      TableName: table,
+      Key: { siteId },
+      UpdateExpression: 'SET weight = :w ADD likeCount :lc, skipCount :sc',
+      ExpressionAttributeValues: {
+        ':w': clampWeight((source.weight ?? 1) + deltas.weightDelta),
+        ':lc': deltas.likeCountDelta,
+        ':sc': deltas.skipCountDelta,
+      },
+    })
+  );
+}
+
+/** 좋아요한 글의 태그를 Profile 관심사에 누적. */
+export async function bumpProfileInterests(
+  table: string,
+  tags: string[],
+  at: string
+): Promise<void> {
+  if (tags.length === 0) return;
+  const profile = await getProfile(table);
+  if (!profile) return;
+  const interests = { ...profile.interests };
+  for (const tag of tags) {
+    const key = tag.trim();
+    if (!key) continue;
+    interests[key] = (interests[key] ?? 0) + 1;
+  }
+  await putProfile(table, { ...profile, interests, updatedAt: at });
 }
 
 // ---- Profile ----

@@ -28,6 +28,7 @@ export const SSM = {
 export const SECRETS = {
   TELEGRAM_BOT_TOKEN: 'hariesse/telegram-bot-token',
   NOTION_TOKEN: 'hariesse/notion-token',
+  TELEGRAM_WEBHOOK_SECRET: 'hariesse/telegram-webhook-secret',
 } as const;
 
 // 기본값 (SSM 미설정 시 폴백)

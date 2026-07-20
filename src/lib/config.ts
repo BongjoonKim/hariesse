@@ -89,3 +89,4 @@ export async function getSecret(name: string): Promise<string> {
 
 export const getTelegramBotToken = () => getSecret(SECRETS.TELEGRAM_BOT_TOKEN);
 export const getNotionToken = () => getSecret(SECRETS.NOTION_TOKEN);
+export const getTelegramWebhookSecret = () => getSecret(SECRETS.TELEGRAM_WEBHOOK_SECRET);

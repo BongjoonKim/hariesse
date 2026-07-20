@@ -1,3 +1,4 @@
+import { encodeCallback } from '../domain/feedback';
 import type { Article, Category } from './types';
 
 const CATEGORY_LABEL: Record<Category, string> = {
@@ -10,9 +11,28 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+export interface InlineKeyboard {
+  inline_keyboard: { text: string; callback_data: string }[][];
+}
+
+/** 항목별 피드백 버튼. callback_data는 Feedback Lambda가 decodeCallback으로 해석. */
+export function buildItemKeyboard(articleId: string): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [
+        { text: '👍 좋아요', callback_data: encodeCallback('like', articleId) },
+        { text: '⭐ 사이트 좋아요', callback_data: encodeCallback('site', articleId) },
+      ],
+      [
+        { text: '💾 nadeliv 글감', callback_data: encodeCallback('save', articleId) },
+        { text: '⏭ 건너뛰기', callback_data: encodeCallback('skip', articleId) },
+      ],
+    ],
+  };
+}
+
 /**
  * 다이제스트 항목 1건 → Telegram HTML 메시지 (스펙 섹션 7 포맷).
- * 워킹 스켈레톤은 인라인 버튼 없이 텍스트+링크만 (버튼은 Feedback 증분에서 추가).
  */
 export function formatItem(article: Article): string {
   const cat = CATEGORY_LABEL[article.category] ?? article.category;
@@ -42,13 +62,27 @@ async function callTelegram(token: string, method: string, body: unknown): Promi
 export async function sendMessage(
   token: string,
   chatId: string,
-  text: string
+  text: string,
+  replyMarkup?: InlineKeyboard
 ): Promise<void> {
   await callTelegram(token, 'sendMessage', {
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
     disable_web_page_preview: false,
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+}
+
+/** 버튼 클릭에 대한 토스트 응답. 없으면 클라이언트가 로딩 상태로 남는다. */
+export async function answerCallbackQuery(
+  token: string,
+  callbackQueryId: string,
+  text: string
+): Promise<void> {
+  await callTelegram(token, 'answerCallbackQuery', {
+    callback_query_id: callbackQueryId,
+    text,
   });
 }
 
@@ -69,6 +103,6 @@ export async function sendDigest(
     `🗞 <b>hariesse 다이제스트</b> — ${escapeHtml(dateLabel)} (${articles.length}건)`
   );
   for (const a of articles) {
-    await sendMessage(token, chatId, formatItem(a));
+    await sendMessage(token, chatId, formatItem(a), buildItemKeyboard(a.articleId));
   }
 }

@@ -2,6 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { DataStack } from '../lib/stacks/data-stack';
 import { PipelineStack } from '../lib/stacks/pipeline-stack';
+import { ApiStack } from '../lib/stacks/api-stack';
 
 const app = new cdk.App();
 
@@ -14,6 +15,14 @@ const env: cdk.Environment = {
 const data = new DataStack(app, 'HariesseData', { env });
 
 new PipelineStack(app, 'HariessePipeline', {
+  env,
+  sourcesTable: data.sourcesTable,
+  articlesTable: data.articlesTable,
+  profileTable: data.profileTable,
+  rawBucket: data.rawBucket,
+});
+
+new ApiStack(app, 'HariesseApi', {
   env,
   sourcesTable: data.sourcesTable,
   articlesTable: data.articlesTable,

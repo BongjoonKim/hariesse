@@ -39,6 +39,11 @@ export interface Article {
   curatedAt?: string;
   deliveredAt?: string;
   ttl?: number;
+  // 피드백 idempotency 마커 — 액션당 1회만 반영 (`${action}FeedbackAt`)
+  likeFeedbackAt?: string;
+  siteFeedbackAt?: string;
+  saveFeedbackAt?: string;
+  skipFeedbackAt?: string;
 }
 
 export interface Profile {

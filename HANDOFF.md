@@ -11,6 +11,15 @@
 >
 > **다음 할 일은 §7 로드맵의 "다음 증분"(Feedback Lambda + Telegram 버튼)이다.**
 
+> ✅ **2026-07-20 Feedback 증분도 배포·E2E 검증 완료.**
+> - `HariesseApi` 스택: Feedback Lambda + Function URL. Telegram webhook 등록됨
+>   (secret_token = Secrets `hariesse/telegram-webhook-secret`, allowed_updates=callback_query).
+> - 다이제스트 항목마다 버튼 4개. 액션 효과는 `src/domain/feedback.ts` 참조
+>   (like: 별표+liked+weight+0.1+Profile 태그 누적 / site: weight+0.25 / save: nadeliv 체크 / skip: 스킵+weight-0.1, weight 클램프 [0.1, 3.0]).
+> - idempotency: Article에 `${action}FeedbackAt` 마커 + 조건부 update. E2E로 검증됨
+>   (401 인증, like 반영, 중복 무시, Notion 상태=별표 전파 확인).
+> - **다음 할 일은 Phase 2 개인화** — Sources 가중치를 스코어링에 실제 반영, `isNovel` 하드코딩 교체.
+
 ---
 
 ## 1. 프로젝트가 뭔가
