@@ -15,6 +15,8 @@ export interface AppConfig {
   sourcesTable: string;
   articlesTable: string;
   profileTable: string;
+  /** 할일/루틴 테이블. 파이프라인 Lambda에는 주입하지 않으므로 비어 있을 수 있다. */
+  tasksTable: string;
   rawBucket: string;
   bedrockModelId: string;
   bedrockRegion: string;
@@ -64,6 +66,7 @@ export async function getConfig(): Promise<AppConfig> {
     sourcesTable: envOrThrow(ENV.SOURCES_TABLE),
     articlesTable: envOrThrow(ENV.ARTICLES_TABLE),
     profileTable: envOrThrow(ENV.PROFILE_TABLE),
+    tasksTable: process.env[ENV.TASKS_TABLE] ?? '',
     rawBucket: envOrThrow(ENV.RAW_BUCKET),
     bedrockModelId: p[SSM.BEDROCK_MODEL_ID] ?? DEFAULTS.BEDROCK_MODEL_ID,
     bedrockRegion: p[SSM.BEDROCK_REGION] ?? DEFAULTS.BEDROCK_REGION,

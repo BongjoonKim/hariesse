@@ -20,6 +20,13 @@
 >   (401 인증, like 반영, 중복 무시, Notion 상태=별표 전파 확인).
 > - **다음 할 일은 Phase 2 개인화** — Sources 가중치를 스코어링에 실제 반영, `isNovel` 하드코딩 교체.
 
+> 🆕 **비서(할일·일정) Phase A 구현 완료 — 아직 미배포.**
+> 주간 반복 루틴을 등록해 두면 **09:00 / 12:00 / 20:00 KST** Telegram 브리핑으로 온다.
+> 항목마다 `[✅ 체크][⏭ 건너뛰기]` 버튼 → 기존 Feedback webhook이 상태를 바꾸고 메시지를 즉시 다시 그린다.
+> - 새 스택 `HariesseAssistant`(Brief Lambda + EventBridge 3개), 새 테이블 `Tasks`(pk/sk).
+> - 설계·로드맵 전체(웹 UI, Google Calendar, 자연어 등록)는 **[docs/ASSISTANT.md](./docs/ASSISTANT.md)**.
+> - 배포 절차는 아래 §4.1.
+
 ---
 
 ## 1. 프로젝트가 뭔가
@@ -108,6 +115,26 @@ aws stepfunctions start-execution \
 **완료 기준**: Telegram에 다이제스트 도착 + Notion DB에 row 생성.
 실패 시 CloudWatch Logs에서 `CollectFn` / `CurateFn` / `DeliverFn` 로그 확인.
 
+### 4.1 비서(할일 브리핑) 배포 — Phase A
+
+```bash
+npm test && npm run build && npx cdk deploy --all   # HariesseAssistant + Tasks 테이블 추가됨
+
+# 주간 루틴 적재 (scripts/seed-routines.ts의 ROUTINES를 고쳐 재실행하면 upsert)
+TASKS_TABLE=<HariesseData 출력 TasksTableName> AWS_REGION=ap-northeast-2 npm run seed:routines
+
+# 브리핑 수동 1회 — slot: morning | midday | evening
+aws lambda invoke --function-name <HariesseAssistant 출력 BriefFunctionName> \
+  --cli-binary-format raw-in-base64-out --payload '{"slot":"morning"}' \
+  --region ap-northeast-2 /dev/stdout
+```
+
+**완료 기준**: 브리핑 메시지 도착 → `[✅]` 버튼 클릭 → 토스트가 뜨고 **메시지가 그 자리에서 갱신**.
+다시 누르면 되돌아온다. 새 시크릿/SSM은 필요 없다 (기존 텔레그램 토큰·chat-id·webhook secret 재사용).
+
+> ⚠️ Function URL webhook은 이미 등록돼 있어 재등록이 필요 없다 — 할일 버튼도 같은 webhook으로 들어온다.
+> 다만 FeedbackFn이 새 코드/환경변수(TASKS_TABLE)를 받으려면 이번 배포가 반드시 포함돼야 한다.
+
 > 배포는 비용이 발생한다. 개인 사용 수준이면 월 몇 달러 안쪽 (DynamoDB on-demand + Lambda 소액 + Bedrock 호출당). 최대 변수는 Bedrock이고 일일 캡 50회가 걸려 있다.
 
 ---
@@ -118,14 +145,15 @@ aws stepfunctions start-execution \
 |---|---|
 | 작업 디렉토리 | `/Users/zayeonic/Projects/haries-work/hariesse` |
 | AWS 계정 / 리전 | `611288736262` / `ap-northeast-2` (IAM user `nadeliv_adm`) |
-| CDK 스택 | `HariesseData`, `HariessePipeline` |
+| CDK 스택 | `HariesseData`, `HariessePipeline`, `HariesseApi`, `HariesseAssistant` |
 | Notion 부모 페이지 | "My secretary" `38de549ed10280e6af9be92c7a6bfb3f` |
 | Notion DB | "hariesse Archive" `a22cbf53637840dc867d6cd8e7b2614e` |
 | Telegram 봇 | `@haries_work_bot`, chat_id `8657904581` |
 | Secrets Manager | `hariesse/telegram-bot-token`, `hariesse/notion-token` |
 | SSM (설정됨) | `/hariesse/telegram-chat-id`, `/hariesse/notion-database-id` |
 | SSM (미설정, 코드 기본값 사용) | `bedrock-model-id`, `bedrock-region`, `exploration-ratio`, `daily-bedrock-cap`, `daily-curate-cap`, `digest-size` |
-| 스케줄 | 매일 **07:00 KST** (= 22:00 UTC) |
+| 스케줄 (콘텐츠) | 매일 **07:00 KST** (= 22:00 UTC) |
+| 스케줄 (브리핑) | 매일 **09:00 / 12:00 / 20:00 KST** (= 00 / 03 / 11 UTC) |
 
 시드 소스 3개: AWS Architecture Blog(cloud), 우아한형제들(dev-ai), 토스(dev-ai).
 
@@ -163,6 +191,12 @@ aws stepfunctions start-execution \
 - Sources 가중치 학습 루프, Profile 패턴 학습, 탐험/활용 슬롯 실제 반영
 - `deliver/index.ts`의 `isNovel: false` 하드코딩을 실제 신호(candidate 소스/미노출 도메인)로 교체
 
+### 비서 트랙 (docs/ASSISTANT.md)
+- **Phase A ✅** 루틴 → 하루 3회 브리핑 → 버튼 체크 (구현 완료, 미배포)
+- **Phase B** 웹 관리 UI — S3+CloudFront 한 배포에 `/api/*`까지, Google OAuth 직접(Cognito 아님)
+- **Phase C** Google Calendar — 읽기는 Google→hariesse, 쓰기는 루틴만 전용 캘린더로
+- **Phase D** 자연어 등록("매주 화 8시 헬스"), 저녁 회고 코멘트, 주간 리포트
+
 ### Phase 3 — 발견·고도화
 - 신규 사이트 자동 발견(Discovery) + candidate 시범 노출
 - `layoutType` 분석, AI 의견 프롬프트 고도화
@@ -177,3 +211,7 @@ aws stepfunctions start-execution \
 - **Bedrock 모델 ID** → 서울은 교차리전 추론 프로파일(`apac.*` / `global.*`) 사용. 비용 절감하려면
   `global.anthropic.claude-haiku-4-5-20251001-v1:0`, 품질 우선이면 `global.anthropic.claude-sonnet-4-5-20250929-v1:0`로 SSM 덮어쓰기.
 - **macOS 셸** → `head -n -1` 같은 GNU 전용 옵션 안 먹는다.
+- **EventBridge cron은 UTC** → KST 09/12/20시는 UTC 00/03/11시. 한국은 서머타임이 없어 고정 -9시간 환산이면 정확하다.
+  `SLOT_HOUR_KST`(`src/domain/routine.ts`)가 단일 출처라 시간을 바꾸면 스택이 따라간다.
+- **`Tasks` 테이블은 RemovalPolicy.RETAIN** → 직접 등록한 루틴은 스택을 지워도 남는다.
+  스택을 지웠다 다시 만들면 같은 이름의 테이블이 남아 있어 배포가 실패할 수 있다.

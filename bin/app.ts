@@ -3,6 +3,7 @@ import * as cdk from 'aws-cdk-lib';
 import { DataStack } from '../lib/stacks/data-stack';
 import { PipelineStack } from '../lib/stacks/pipeline-stack';
 import { ApiStack } from '../lib/stacks/api-stack';
+import { AssistantStack } from '../lib/stacks/assistant-stack';
 
 const app = new cdk.App();
 
@@ -22,11 +23,21 @@ new PipelineStack(app, 'HariessePipeline', {
   rawBucket: data.rawBucket,
 });
 
+new AssistantStack(app, 'HariesseAssistant', {
+  env,
+  tasksTable: data.tasksTable,
+  sourcesTable: data.sourcesTable,
+  articlesTable: data.articlesTable,
+  profileTable: data.profileTable,
+  rawBucket: data.rawBucket,
+});
+
 new ApiStack(app, 'HariesseApi', {
   env,
   sourcesTable: data.sourcesTable,
   articlesTable: data.articlesTable,
   profileTable: data.profileTable,
+  tasksTable: data.tasksTable,
   rawBucket: data.rawBucket,
 });
 

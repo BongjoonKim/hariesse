@@ -8,6 +8,7 @@ export const ENV = {
   SOURCES_TABLE: 'SOURCES_TABLE',
   ARTICLES_TABLE: 'ARTICLES_TABLE',
   PROFILE_TABLE: 'PROFILE_TABLE',
+  TASKS_TABLE: 'TASKS_TABLE',
   RAW_BUCKET: 'RAW_BUCKET',
 } as const;
 
@@ -41,4 +42,6 @@ export const DEFAULTS = {
   DAILY_CURATE_CAP: 40,
   DIGEST_SIZE: 8,
   ARTICLE_TTL_DAYS: 30,
+  /** 하루 할일 아이템 보존 기간 — 스트릭/회고용으로 1년 남긴다. */
+  TASK_TTL_DAYS: 365,
 } as const;

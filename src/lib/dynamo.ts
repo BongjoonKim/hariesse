@@ -12,7 +12,8 @@ import { clampWeight, type FeedbackAction } from '../domain/feedback';
 import type { Article, ArticleStatus, Source, Profile } from './types';
 
 const region = process.env.AWS_REGION ?? DEFAULTS.BEDROCK_REGION;
-const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
+/** Tasks 테이블 접근(`tasks.ts`)도 같은 클라이언트를 재사용한다. */
+export const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region }), {
   marshallOptions: { removeUndefinedValues: true },
 });
 

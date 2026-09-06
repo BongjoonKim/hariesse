@@ -6,14 +6,31 @@ import {
   bumpProfileInterests,
 } from '../../lib/dynamo';
 import { decodeCallback, feedbackEffects } from '../../domain/feedback';
-import { answerCallbackQuery } from '../../lib/telegram';
+import {
+  decodeTaskCallback,
+  orderTasksBy,
+  shiftDate,
+  skipToggleStatus,
+  tasksForSlot,
+  toggleStatus,
+} from '../../domain/routine';
+import { getTask, listDayTasks, setTaskStatus } from '../../lib/tasks';
+import {
+  answerCallbackQuery,
+  buildTaskKeyboard,
+  editMessageText,
+  formatBrief,
+} from '../../lib/telegram';
 import { upsertArticle } from '../../lib/notion';
+import type { TaskStatus } from '../../lib/types';
 
 /**
  * Telegram webhook 수신 (Lambda Function URL).
  * - X-Telegram-Bot-Api-Secret-Token 헤더로 인증 (setWebhook의 secret_token과 일치해야 함).
  * - callback_query만 처리. 응답은 항상 200 (아니면 Telegram이 재시도 폭주).
- * - idempotency: 액션당 1회만 반영 (`${action}FeedbackAt` 마커, dynamo 조건부 update).
+ * - `v1|…` = 다이제스트 피드백, `t1|…` = 브리핑 할일 체크. prefix로 갈린다.
+ * - idempotency: 다이제스트는 액션당 1회만 반영 (`${action}FeedbackAt` 마커, 조건부 update).
+ *   할일 체크는 상태 대입이라 여러 번 눌러도 같은 결과 (토글은 의도된 되돌리기).
  */
 
 interface FunctionUrlEvent {
@@ -22,10 +39,17 @@ interface FunctionUrlEvent {
   isBase64Encoded?: boolean;
 }
 
+interface TelegramMessage {
+  message_id: number;
+  chat: { id: number | string };
+  reply_markup?: { inline_keyboard: { callback_data?: string }[][] };
+}
+
 interface TelegramUpdate {
   callback_query?: {
     id: string;
     data?: string;
+    message?: TelegramMessage;
   };
 }
 
@@ -35,6 +59,12 @@ interface HttpResponse {
 }
 
 const OK: HttpResponse = { statusCode: 200, body: 'ok' };
+
+const TASK_ACK: Record<TaskStatus, string> = {
+  done: '✅ 완료! 잘했어요',
+  skipped: '⏭ 오늘은 건너뛸게요',
+  todo: '↩️ 되돌렸어요',
+};
 
 export const handler = async (event: FunctionUrlEvent): Promise<HttpResponse> => {
   const secret = await getTelegramWebhookSecret();
@@ -64,6 +94,66 @@ export const handler = async (event: FunctionUrlEvent): Promise<HttpResponse> =>
       console.warn(`answerCallbackQuery 실패: ${(err as Error).message}`);
     }
   };
+
+  const taskCb = decodeTaskCallback(cb.data);
+  if (taskCb) {
+    const cfg = await getConfig();
+    if (!cfg.tasksTable) {
+      await answer('할일 기능이 아직 설정되지 않았어요');
+      return OK;
+    }
+    const task = await getTask(cfg.tasksTable, taskCb.date, taskCb.sk);
+    if (!task) {
+      await answer('이미 없는 할일이에요');
+      return OK;
+    }
+
+    const next: TaskStatus =
+      taskCb.action === 'toggle' ? toggleStatus(task.status) : skipToggleStatus(task.status);
+    const updated = await setTaskStatus(
+      cfg.tasksTable,
+      taskCb.date,
+      taskCb.sk,
+      next,
+      new Date().toISOString()
+    );
+    if (!updated) {
+      await answer('이미 없는 할일이에요');
+      return OK;
+    }
+
+    // 메시지 다시 그리기 — 실패해도 상태 변경 자체는 이미 반영됐다.
+    try {
+      const msg = cb.message;
+      if (msg) {
+        const dayTasks = await listDayTasks(cfg.tasksTable, taskCb.date);
+        const skOrder = (msg.reply_markup?.inline_keyboard ?? [])
+          .map((row) => decodeTaskCallback(row[0]?.callback_data)?.sk)
+          .filter((sk): sk is string => Boolean(sk));
+        const shown =
+          skOrder.length > 0
+            ? orderTasksBy(skOrder, dayTasks)
+            : tasksForSlot(dayTasks, taskCb.slot);
+        const tomorrow =
+          taskCb.slot === 'evening'
+            ? await listDayTasks(cfg.tasksTable, shiftDate(taskCb.date, 1))
+            : [];
+        await editMessageText(
+          botToken,
+          msg.chat.id,
+          msg.message_id,
+          formatBrief(taskCb.slot, taskCb.date, shown, dayTasks, tomorrow),
+          buildTaskKeyboard(taskCb.slot, taskCb.date, shown)
+        );
+      }
+    } catch (err) {
+      console.warn(`브리핑 메시지 갱신 실패: ${(err as Error).message}`);
+    }
+
+    console.log(`task ${taskCb.action}: ${taskCb.date}/${taskCb.sk} → ${next}`);
+    await answer(TASK_ACK[next]);
+    return OK;
+  }
 
   const decoded = decodeCallback(cb.data);
   if (!decoded) {

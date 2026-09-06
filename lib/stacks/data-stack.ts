@@ -11,6 +11,7 @@ export class DataStack extends cdk.Stack {
   readonly sourcesTable: dynamodb.Table;
   readonly articlesTable: dynamodb.Table;
   readonly profileTable: dynamodb.Table;
+  readonly tasksTable: dynamodb.Table;
   readonly rawBucket: s3.Bucket;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -56,6 +57,16 @@ export class DataStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
+    // Tasks — 루틴 정의 + 날짜별 할일 (pk="ROUTINE" | "DAY#YYYY-MM-DD", sk=id)
+    // 하루치 조회가 pk 하나로 끝나도록 잡은 단일 테이블 구조.
+    this.tasksTable = new dynamodb.Table(this, 'Tasks', {
+      partitionKey: { name: 'pk', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'ttl', // 날짜별 할일만 ttl을 갖는다. 루틴 정의는 영구 보존.
+      removalPolicy: cdk.RemovalPolicy.RETAIN, // 직접 등록한 일정 — 스택을 지워도 남긴다
+    });
+
     // S3 — raw/<articleId>.txt 본문 원문
     this.rawBucket = new s3.Bucket(this, 'RawText', {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -68,6 +79,7 @@ export class DataStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'SourcesTableName', { value: this.sourcesTable.tableName });
     new cdk.CfnOutput(this, 'ArticlesTableName', { value: this.articlesTable.tableName });
     new cdk.CfnOutput(this, 'ProfileTableName', { value: this.profileTable.tableName });
+    new cdk.CfnOutput(this, 'TasksTableName', { value: this.tasksTable.tableName });
     new cdk.CfnOutput(this, 'RawBucketName', { value: this.rawBucket.bucketName });
   }
 }
