@@ -25,7 +25,7 @@
 > 항목마다 `[✅ 체크][⏭ 건너뛰기]` 버튼 → 기존 Feedback webhook이 상태를 바꾸고 메시지를 즉시 다시 그린다.
 > - 새 스택 `HariesseAssistant`(Brief Lambda + EventBridge 3개), 새 테이블 `Tasks`(pk/sk).
 > - 설계·로드맵 전체(웹 UI, Google Calendar, 자연어 등록)는 **[docs/ASSISTANT.md](./docs/ASSISTANT.md)**.
-> - **웹 UI**: CloudFront 배포 하나에 SPA(S3+OAC)와 API(Lambda Function URL+OAC)를 함께.
+> - **웹 UI**: CloudFront 배포 하나에 SPA(S3+OAC)와 API(Lambda Function URL)를 함께.
 >   Google 로그인(허용 이메일 1개), 오늘 화면 체크, 주간 루틴 편집.
 >   새 스택 `HariesseWeb`, 프론트는 `web/`(Vite+React).
 > - 배포 절차는 아래 §4.1(브리핑) / §4.2(웹).
@@ -260,6 +260,11 @@ aws lambda invoke --function-name <HariesseAssistant 출력 BriefFunctionName> \
 - **macOS 셸** → `head -n -1` 같은 GNU 전용 옵션 안 먹는다.
 - **EventBridge cron은 UTC** → KST 09/12/20시는 UTC 00/03/11시. 한국은 서머타임이 없어 고정 -9시간 환산이면 정확하다.
   `SLOT_HOUR_KST`(`src/domain/routine.ts`)가 단일 출처라 시간을 바꾸면 스택이 따라간다.
+- **Lambda Function URL에 OAC(AWS_IAM)를 붙이면 POST/PUT이 깨진다** → AWS 문서가 명시:
+  본문이 있는 요청은 클라이언트가 `x-amz-content-sha256`(본문 SHA-256)를 직접 실어야 하고
+  "Lambda doesn't support unsigned payloads". CloudFront Function은 **본문에 접근할 수 없어**
+  엣지에서 채울 수도 없다. 그래서 `/api/*`는 OAC 없이 세션 쿠키로 인증한다.
+  (S3 오리진은 unsigned payload를 받으므로 OAC 그대로 유지.)
 - **CloudFront `errorResponses`는 배포 전체에 걸린다** → SPA 폴백으로 쓰면 API의 404까지
   index.html(200)로 바뀐다. 기본 behavior에만 붙는 뷰어 CloudFront Function으로 처리했다.
 - **`/hariesse/web-origin`은 배포 후에만 알 수 있다** (CloudFront 도메인). 닭-달걀이라

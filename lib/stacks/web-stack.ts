@@ -27,11 +27,11 @@ const WEB_DIST = path.join(__dirname, '..', '..', 'web', 'dist');
  * Web 스택 — hariesse 관리 UI.
  *
  * CloudFront 배포 **하나**에 두 오리진을 물린다:
- *   기본     → S3(비공개, OAC)        : SPA 정적 파일
- *   /api/*  → Lambda Function URL(OAC): 할일·루틴 API
+ *   기본     → S3(비공개, OAC)   : SPA 정적 파일
+ *   /api/*  → Lambda Function URL: 할일·루틴 API
  *
  * 같은 오리진이라 CORS가 없고, 세션 쿠키를 HttpOnly·Secure·SameSite=Lax로 쓸 수 있다.
- * Function URL은 AWS_IAM 인증이라 CloudFront를 우회한 직접 호출이 불가능하다.
+ * API 인증은 세션 쿠키 검증이 맡는다 (Function URL에 OAC를 못 쓰는 이유는 아래 주석).
  */
 export class WebStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: WebStackProps) {
@@ -79,8 +79,9 @@ export class WebStack extends cdk.Stack {
     );
     tasksTable.grantReadWriteData(apiFn);
 
+    // authType NONE + 세션 쿠키 검증. OAC(AWS_IAM)를 쓰지 않는 이유는 아래 오리진 설정 참고.
     const apiUrl = apiFn.addFunctionUrl({
-      authType: lambda.FunctionUrlAuthType.AWS_IAM, // CloudFront OAC만 호출 가능
+      authType: lambda.FunctionUrlAuthType.NONE,
     });
 
     // ---- SPA 버킷 ----
@@ -127,11 +128,24 @@ export class WebStack extends cdk.Stack {
       },
       additionalBehaviors: {
         '/api/*': {
-          origin: origins.FunctionUrlOrigin.withOriginAccessControl(apiUrl),
+          /**
+           * OAC(Function URL + AWS_IAM)를 쓰지 않는다.
+           * AWS 문서: "If you use PUT or POST methods with your Lambda function URL, your users
+           * must compute the SHA256 of the body and include the payload hash ... in the
+           * x-amz-content-sha256 header. Lambda doesn't support unsigned payloads."
+           * 그런데 CloudFront Function은 **요청 본문에 접근할 수 없어** 엣지에서 채워줄 수 없다.
+           * 이 API는 저장·체크가 전부 POST/PATCH라 OAC를 쓰면 쓰기가 통째로 막힌다.
+           *
+           * 대신 인증은 핸들러의 세션 쿠키 검증이 맡는다 (기존 Telegram webhook과 같은 형태).
+           * Function URL 자체는 공개지만 `/auth/*` 외 모든 경로가 유효한 서명 세션을 요구하고,
+           * reservedConcurrentExecutions로 남용 반경을 묶어 둔다.
+           */
+          origin: new origins.FunctionUrlOrigin(apiUrl),
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          // 쿠키·쿼리스트링을 그대로 넘긴다 (Host는 오리진 것으로 — SigV4 서명 때문에 필수).
+          // 쿠키·쿼리스트링은 그대로 넘기되 Host는 오리진 것으로.
+          // Function URL은 Host가 자기 도메인이 아니면 동작하지 않는다(AWS 문서 명시).
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
         },
       },

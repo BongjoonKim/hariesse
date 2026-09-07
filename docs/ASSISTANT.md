@@ -62,18 +62,37 @@ pk="DAY#2026-09-07"    sk=<routineId>   그날 할일 (TTL 365일)
 
 ```
 CloudFront (배포 1개)
- ├── 기본 behavior  → S3(비공개) + OAC        : SPA 정적 파일
- └── /api/*        → Lambda Function URL + OAC : 할일·루틴 API
+ ├── 기본 behavior  → S3(비공개) + OAC   : SPA 정적 파일
+ └── /api/*        → Lambda Function URL : 할일·루틴 API
 ```
 
 **같은 배포에 API를 붙이는 이유**: 동일 오리진이 되어 CORS가 사라지고, 세션 쿠키를
 `HttpOnly; Secure; SameSite=Lax`로 안전하게 쓸 수 있다. 도메인 하나만 관리하면 된다.
 
-**API Gateway 대신 Lambda Function URL + OAC를 쓴 이유** (설계 초안에서 바뀐 부분):
-Function URL을 `AWS_IAM` 인증으로 두고 CloudFront OAC가 SigV4로 서명하면,
-**CloudFront를 우회한 직접 호출이 불가능**하다. API Gateway 한 겹이 통째로 빠지면서
-보안은 오히려 강해지고 비용·지연도 줄어든다. (기존 Telegram webhook은 여전히
-`authType: NONE` + secret_token 검증 — 텔레그램이 CloudFront를 통과할 이유가 없으므로 그대로 둔다.)
+**API Gateway 대신 Lambda Function URL**: 한 겹이 통째로 빠지고 비용·지연이 준다.
+API 인증은 핸들러의 세션 쿠키 검증이 맡는다 (기존 Telegram webhook과 같은 형태).
+
+> ### ⛔️ Function URL에 OAC(AWS_IAM)를 쓰지 않는 이유 — 시도했다가 되돌렸다
+>
+> 처음엔 Function URL을 `AWS_IAM`으로 두고 CloudFront OAC가 SigV4 서명하게 잡았다.
+> CloudFront 우회 호출이 막히니 더 안전해 보였지만, **쓰기가 통째로 깨진다.**
+>
+> > If you use `PUT` or `POST` methods with your Lambda function URL, your users must
+> > compute the SHA256 of the body and include the payload hash value of the request body
+> > in the `x-amz-content-sha256` header when sending the request to CloudFront.
+> > **Lambda doesn't support unsigned payloads.**
+> > — [Restrict access to an AWS Lambda function URL origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-lambda.html)
+>
+> 그리고 엣지에서 대신 채워줄 수도 없다 — **CloudFront Function은 요청 본문에 접근할 수 없다**
+> ([Restrictions on CloudFront Functions](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-function-restrictions.html)).
+> 이 API는 루틴 저장·할일 체크가 전부 POST/PATCH라 정면으로 걸린다.
+> (S3 오리진은 해당 없음 — S3는 unsigned payload를 받는다. 그래서 SPA 쪽 OAC는 그대로 둔다.)
+>
+> **남는 노출**: Function URL 자체는 공개다. 다만 `/auth/*` 외 모든 경로가 유효한 서명 세션을
+> 요구하므로 데이터는 열리지 않고, 남는 건 "인증 없이 Lambda를 호출당하는 비용"뿐이다.
+> `reservedConcurrentExecutions: 5`로 반경을 묶어 뒀다.
+> 더 조이려면 CloudFront 커스텀 오리진 헤더(공유 비밀)를 얹는 게 다음 수단이다
+> — `X-Amz-`로 시작하지 않는 헤더여야 한다.
 
 > ⚠️ **SPA 폴백을 `errorResponses`로 하면 안 된다.** CloudFront의 커스텀 에러 응답은
 > **배포 전체**에 걸려서 API가 낸 404까지 `index.html`(200)로 바꿔버린다.

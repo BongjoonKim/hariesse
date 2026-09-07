@@ -27,7 +27,7 @@ Google Calendar 연동은 다음 Phase.
 - **ApiStack**: Feedback Lambda + Function URL(Telegram webhook, secret_token 헤더 인증).
   다이제스트 피드백(`v1|…`)과 브리핑 할일 체크(`t1|…`)를 한 webhook에서 처리.
 - **WebStack**: CloudFront 배포 1개 — 기본 behavior는 S3(비공개+OAC) SPA,
-  `/api/*`는 Lambda Function URL(AWS_IAM + OAC). 동일 오리진이라 CORS 없음, 쿠키 세션 가능.
+  `/api/*`는 Lambda Function URL. 동일 오리진이라 CORS 없음, 쿠키 세션 가능.
 - **LLM**: Amazon Bedrock(Claude), 서울 리전 ap-northeast-2. 모델 ID는 SSM 분리, 교차리전 추론 프로파일(`apac.*`).
 
 ## 데이터 흐름
@@ -78,6 +78,9 @@ Google Calendar 연동은 다음 Phase.
 - **웹 인증은 fail-closed**: SSM `/hariesse/allowed-email`이 비면 아무도 로그인하지 못한다. 이 성질을 깨지 말 것.
 - **CloudFront `errorResponses` 금지**: 배포 전체에 걸려 API의 404까지 index.html로 바꾼다.
   SPA 폴백은 기본 behavior에만 붙는 CloudFront Function으로 한다.
+- **`/api/*` Function URL에 OAC(AWS_IAM)를 붙이지 말 것**: 본문 있는 요청은 클라이언트가
+  `x-amz-content-sha256`를 실어야 하는데 CloudFront Function은 본문을 못 읽는다 → POST/PATCH가 전부 깨진다.
+  근거와 대안은 docs/ASSISTANT.md §2.
 - **루틴 수정 시 재전개**: `resyncRoutineDays`가 앞으로 14일 중 **아직 todo인 전개분만** 지운다.
   체크·스킵한 기록은 절대 건드리지 않는다.
 - **순수함수 우선**: 스코어링/추출 로직은 네트워크와 분리해 단위테스트 가능하게.
