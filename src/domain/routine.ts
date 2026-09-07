@@ -215,3 +215,142 @@ export function shouldSendBrief(
   if (slot === 'midday') return dayTaskCount > 0;
   return dayTaskCount > 0 || tomorrowTaskCount > 0;
 }
+
+// ---- 웹 API 입력 검증 (순수함수, 테스트 대상) ----
+
+export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
+
+const fail = (error: string): Parsed<never> => ({ ok: false, error });
+
+export interface RoutineInput {
+  title: string;
+  daysOfWeek: number[];
+  timeOfDay?: string;
+  remindSlots?: BriefSlot[];
+  category?: string;
+  estimatedMinutes?: number;
+  note?: string;
+  active: boolean;
+}
+
+export interface TaskInput {
+  title: string;
+  timeOfDay?: string;
+  category?: string;
+  estimatedMinutes?: number;
+  note?: string;
+}
+
+export function isValidDate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+
+const isTime = (v: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+
+function optionalText(
+  raw: Record<string, unknown>,
+  key: string,
+  max: number
+): Parsed<string | undefined> {
+  const v = raw[key];
+  if (v === undefined || v === null || v === '') return { ok: true, value: undefined };
+  if (typeof v !== 'string') return fail(`${key}는 문자열이어야 합니다`);
+  const trimmed = v.trim();
+  if (!trimmed) return { ok: true, value: undefined };
+  if (trimmed.length > max) return fail(`${key}는 ${max}자 이하여야 합니다`);
+  return { ok: true, value: trimmed };
+}
+
+function optionalMinutes(raw: Record<string, unknown>): Parsed<number | undefined> {
+  const v = raw.estimatedMinutes;
+  if (v === undefined || v === null || v === '') return { ok: true, value: undefined };
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isInteger(n) || n < 1 || n > 600) {
+    return fail('estimatedMinutes는 1~600 사이 정수여야 합니다');
+  }
+  return { ok: true, value: n };
+}
+
+function commonFields(raw: Record<string, unknown>): Parsed<TaskInput> {
+  const title = raw.title;
+  if (typeof title !== 'string' || !title.trim()) return fail('title이 필요합니다');
+  if (title.trim().length > 120) return fail('title은 120자 이하여야 합니다');
+
+  const timeOfDay = raw.timeOfDay;
+  if (timeOfDay !== undefined && timeOfDay !== null && timeOfDay !== '') {
+    if (typeof timeOfDay !== 'string' || !isTime(timeOfDay)) {
+      return fail('timeOfDay는 HH:MM 형식이어야 합니다');
+    }
+  }
+
+  const category = optionalText(raw, 'category', 40);
+  if (!category.ok) return category;
+  const note = optionalText(raw, 'note', 300);
+  if (!note.ok) return note;
+  const minutes = optionalMinutes(raw);
+  if (!minutes.ok) return minutes;
+
+  return {
+    ok: true,
+    value: {
+      title: title.trim(),
+      timeOfDay: typeof timeOfDay === 'string' && timeOfDay ? timeOfDay : undefined,
+      category: category.value,
+      note: note.value,
+      estimatedMinutes: minutes.value,
+    },
+  };
+}
+
+export function parseTaskInput(raw: unknown): Parsed<TaskInput> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('본문이 필요합니다');
+  return commonFields(raw as Record<string, unknown>);
+}
+
+export function parseRoutineInput(raw: unknown): Parsed<RoutineInput> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fail('본문이 필요합니다');
+  const obj = raw as Record<string, unknown>;
+
+  const base = commonFields(obj);
+  if (!base.ok) return base;
+
+  const days = obj.daysOfWeek;
+  if (!Array.isArray(days) || days.length === 0) return fail('daysOfWeek에 요일이 하나는 필요합니다');
+  const unique = [...new Set(days)];
+  if (!unique.every((d) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6)) {
+    return fail('daysOfWeek는 0(일)~6(토) 정수여야 합니다');
+  }
+
+  let remindSlots: BriefSlot[] | undefined;
+  const slots = obj.remindSlots;
+  if (slots !== undefined && slots !== null) {
+    if (!Array.isArray(slots)) return fail('remindSlots는 배열이어야 합니다');
+    const picked = [...new Set(slots)];
+    if (!picked.every((s) => (ALL_SLOTS as readonly unknown[]).includes(s))) {
+      return fail('remindSlots는 morning/midday/evening만 가능합니다');
+    }
+    // 전부 고른 것과 비우는 것은 같은 의미 — 비워서 저장한다.
+    remindSlots =
+      picked.length > 0 && picked.length < ALL_SLOTS.length ? (picked as BriefSlot[]) : undefined;
+  }
+
+  return {
+    ok: true,
+    value: {
+      ...base.value,
+      daysOfWeek: (unique as number[]).sort((a, b) => a - b),
+      remindSlots,
+      active: obj.active === undefined ? true : obj.active === true,
+    },
+  };
+}
+
+export function parseStatusInput(raw: unknown): Parsed<TaskStatus> {
+  const status = (raw as Record<string, unknown> | null)?.status;
+  if (status === 'todo' || status === 'done' || status === 'skipped') {
+    return { ok: true, value: status };
+  }
+  return fail('status는 todo/done/skipped 중 하나여야 합니다');
+}

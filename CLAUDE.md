@@ -3,20 +3,22 @@
 개인용 서버리스 비서 에이전트(hariesse). 두 갈래로 돈다.
 1. **콘텐츠**: 매일 여행 / 개발·AI·클라우드 글을 자동 수집·요약·큐레이션해 **Telegram 다이제스트 + Notion 아카이브**.
 2. **할일·일정**: 주간 반복 루틴을 등록해 두면 **하루 3회(09/12/20 KST) Telegram 브리핑**으로 챙겨준다.
+   루틴 등록·오늘 체크는 **웹 UI(CloudFront)** 에서 한다.
 
 > 📌 **세션을 이어받는 중이라면 [HANDOFF.md](./HANDOFF.md)를 먼저 읽을 것.**
 > 현재 상태, 검증 결과, 다음 실행할 명령어, 결정 이력이 모두 거기 있다.
 > **요약: 2026-07-20 배포 + E2E 검증 완료. Feedback 증분(Telegram 버튼 + ApiStack)도 배포·검증 완료.**
-> **비서(할일/브리핑) Phase A는 코드 완료·미배포 — 설계 전체는 [docs/ASSISTANT.md](./docs/ASSISTANT.md).**
+> **비서 Phase A(브리핑) + B(웹 UI)는 코드 완료·미배포 — 설계 전체는 [docs/ASSISTANT.md](./docs/ASSISTANT.md).**
 
 ## 현재 상태
 **콘텐츠**: `Collection → Curation → Delivery → Feedback` 루프가 끝까지 동작 (배포·검증 완료).
-**비서**: 루틴 → 하루 3회 브리핑 → 버튼 체크 루프 구현 완료 (미배포). 웹 UI·Google Calendar는 다음 Phase.
+**비서**: 루틴 → 하루 3회 브리핑 → 버튼 체크 + 웹 관리 UI까지 구현 완료 (미배포).
+Google Calendar 연동은 다음 Phase.
 - 다이제스트 항목마다 인라인 버튼 `[👍 좋아요][⭐ 사이트 좋아요][💾 nadeliv 글감][⏭ 건너뛰기]`
   → Feedback Lambda가 Sources 가중치 ±, Profile 관심사 누적, Notion 상태 갱신 (액션당 1회 idempotent).
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, YouTube/arXiv/HN/Reddit 소스 확장.
-- **비서 제외(다음 증분)**: 웹 관리 UI(S3+CloudFront), Google Calendar 연동, 자연어 등록.
+- **비서 제외(다음 증분)**: Google Calendar 연동(Phase C), 자연어 등록·주간 리포트(Phase D).
 
 ## 아키텍처
 - **DataStack**: DynamoDB `Sources`/`Articles`/`Profile`/`Tasks` + S3(raw 본문).
@@ -24,6 +26,8 @@
 - **AssistantStack**: Brief Lambda + EventBridge 3개(09/12/20 KST). 콘텐츠 파이프라인과 스케줄·실패 반경 분리.
 - **ApiStack**: Feedback Lambda + Function URL(Telegram webhook, secret_token 헤더 인증).
   다이제스트 피드백(`v1|…`)과 브리핑 할일 체크(`t1|…`)를 한 webhook에서 처리.
+- **WebStack**: CloudFront 배포 1개 — 기본 behavior는 S3(비공개+OAC) SPA,
+  `/api/*`는 Lambda Function URL(AWS_IAM + OAC). 동일 오리진이라 CORS 없음, 쿠키 세션 가능.
 - **LLM**: Amazon Bedrock(Claude), 서울 리전 ap-northeast-2. 모델 ID는 SSM 분리, 교차리전 추론 프로파일(`apac.*`).
 
 ## 데이터 흐름
@@ -35,6 +39,8 @@
 비서    EventBridge(09/12/20시) → Brief: ensureDayPlan(루틴→그날 할일, 조건부 put)
                                   → 슬롯별 노출 계산 → Telegram + [✅][⏭] 버튼
         버튼 클릭 → Feedback(webhook) → 상태 변경 → 같은 메시지 다시 그림
+
+웹      브라우저 → CloudFront → /api/* → WebApiFn (Google 로그인, 루틴 CRUD, 오늘 체크)
 ```
 
 `Tasks` 테이블은 pk/sk 단일 테이블: `ROUTINE`(루틴 정의, 영구) / `DAY#YYYY-MM-DD`(그날 할일, TTL 365일).
@@ -52,7 +58,11 @@
 - `src/domain/feedback.ts` — 다이제스트 callback_data + 액션별 효과(순수함수, 테스트 대상).
 - `src/domain/routine.ts` — KST 날짜 계산, 루틴→하루 전개, 슬롯별 노출, 상태 토글,
   할일 callback_data(순수함수, 테스트 대상).
-- `src/handlers/{collect,curate,deliver,feedback,brief}/index.ts` — Lambda 핸들러.
+- `src/lib/google-oauth.ts` — Google OAuth(Authorization Code + PKCE) URL 생성·토큰 교환.
+- `src/domain/session.ts` — 세션/PKCE 서명 쿠키, 허용 이메일 판정(순수함수, 테스트 대상).
+- `src/domain/routine.ts`의 `parseRoutineInput`/`parseTaskInput` — 웹 입력 검증(순수함수).
+- `src/handlers/{collect,curate,deliver,feedback,brief,api}/index.ts` — Lambda 핸들러.
+- `web/` — 관리 UI (Vite + React + TS, 의존성은 React뿐). `npm run build:web`로 `web/dist` 생성.
 - `docs/ASSISTANT.md` — 비서 기능 설계·로드맵 (웹 UI·Google Calendar 포함).
 
 ## 코딩 규칙 / 가드레일
@@ -65,23 +75,30 @@
 - **할일 체크는 토글**: 다이제스트 피드백의 1회성 마커와 정책이 다르다. 오탭을 같은 버튼으로 되돌릴 수 있어야 한다.
 - **KST 환산**: 한국은 서머타임이 없어 UTC 고정 -9시간이면 정확하다. EventBridge cron은 UTC로 적는다.
 - **소스 오브 트루스**: 반복 루틴은 hariesse, 약속·회의는 Google Calendar. 이 경계를 흐리지 말 것 (docs/ASSISTANT.md §0).
+- **웹 인증은 fail-closed**: SSM `/hariesse/allowed-email`이 비면 아무도 로그인하지 못한다. 이 성질을 깨지 말 것.
+- **CloudFront `errorResponses` 금지**: 배포 전체에 걸려 API의 404까지 index.html로 바꾼다.
+  SPA 폴백은 기본 behavior에만 붙는 CloudFront Function으로 한다.
+- **루틴 수정 시 재전개**: `resyncRoutineDays`가 앞으로 14일 중 **아직 todo인 전개분만** 지운다.
+  체크·스킵한 기록은 절대 건드리지 않는다.
 - **순수함수 우선**: 스코어링/추출 로직은 네트워크와 분리해 단위테스트 가능하게.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.
 
 ## 설정값 위치
 - SSM `/hariesse/*`: bedrock-model-id, bedrock-region, exploration-ratio, notion-database-id,
   telegram-chat-id, daily-bedrock-cap, daily-curate-cap, digest-size.
-- Secrets `hariesse/telegram-bot-token`, `hariesse/notion-token`.
+- SSM 웹: `/hariesse/allowed-email`(로그인 허용 이메일), `/hariesse/web-origin`(CloudFront 도메인, 배포 후 기입).
+- Secrets `hariesse/telegram-bot-token`, `hariesse/notion-token`, `hariesse/telegram-webhook-secret`,
+  `hariesse/google-oauth`(`{clientId, clientSecret}`), `hariesse/session-secret`.
 - Notion DB ID (생성됨): `a22cbf53637840dc867d6cd8e7b2614e` (My secretary 페이지 하위, DB명 "hariesse Archive").
 
 ## 배포 / 검증
 ```
 npm install
-npm test                 # scoring + extract + routine + brief 단위테스트
+npm test                 # scoring/extract/routine/brief/session/validate 단위테스트
 npm run build            # tsc --noEmit 타입체크
 npx cdk synth            # 합성
 npx cdk bootstrap        # 최초 1회
-npx cdk deploy --all
+npm run deploy           # = build:web + cdk deploy --all (웹 포함)
 # 배포 후: SSM/Secrets 값 입력 → seed → 상태머신 수동 실행
 SOURCES_TABLE=<out> PROFILE_TABLE=<out> AWS_REGION=ap-northeast-2 npm run seed
 
@@ -92,5 +109,10 @@ TASKS_TABLE=<HariesseData 출력값> AWS_REGION=ap-northeast-2 npm run seed:rout
 aws lambda invoke --function-name <HariesseAssistant 출력 BriefFunctionName> \
   --cli-binary-format raw-in-base64-out --payload '{"slot":"morning"}' \
   --region ap-northeast-2 /dev/stdout
+
+# 웹: Google OAuth 클라이언트 → 시크릿/SSM 기입 → 배포 → WebUrl·RedirectUri 꽂기 (HANDOFF §4.2)
+npm run build:web        # 프론트만 다시 빌드
+npm run dev:web          # 프론트 로컬 개발 서버
 ```
 완료 기준: 매일 다이제스트가 오고 Notion에 글이 쌓인다. 09/12/20시에 할일 브리핑이 오고 버튼으로 체크된다.
+웹에서 등록한 루틴이 그날 브리핑에 그대로 나온다.

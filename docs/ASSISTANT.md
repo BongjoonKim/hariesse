@@ -51,65 +51,80 @@ pk="DAY#2026-09-07"    sk=<routineId>   그날 할일 (TTL 365일)
 - 체크는 토글이다. 잘못 누르면 같은 버튼으로 되돌아온다 (다이제스트 피드백의 1회성 마커와 다른 정책 — 할일은 상태 대입이라 여러 번 눌러도 안전).
 - 한국은 서머타임이 없어 KST→UTC는 `-9시간` 고정 환산이면 정확하다. EventBridge cron은 UTC.
 
-**알려진 제약 (Phase B에서 해소)**
-- 루틴을 고쳐도 **이미 전개된 그날 할일에는 반영되지 않는다** (`putTaskIfNew`가 기존 아이템을 보존 —
-  체크해 둔 상태를 덮어쓰지 않기 위한 의도된 동작). 저녁 브리핑이 내일치를 미리 전개하므로
-  "오늘 저녁에 고친 루틴이 내일 아침에 안 보인다"가 될 수 있다. 웹 UI에서 루틴을 저장할 때
-  아직 `todo`인 미래 아이템만 다시 전개하면 해결된다.
-- 루틴 등록이 `scripts/seed-routines.ts` 편집 → 재실행뿐이다. 이게 Phase B가 필요한 이유.
+> ~~루틴을 고쳐도 이미 전개된 할일에 반영되지 않음~~ → Phase B의 `resyncRoutineDays`로 해소.
+> ~~루틴 등록이 시드 스크립트 편집뿐~~ → Phase B의 웹 UI로 해소. 시드 스크립트는 초기 적재용으로만 남는다.
 
 ---
 
-## 2. Phase B — 웹 관리 UI (CloudFront)
+## 2. Phase B — 웹 관리 UI (CloudFront) ✅ 구현 완료
 
 ### 구성
 
 ```
 CloudFront (배포 1개)
- ├── 기본 behavior  → S3(비공개) + OAC : SPA 정적 파일
- └── /api/*        → API Gateway HTTP API → TasksApiFn (Lambda)
+ ├── 기본 behavior  → S3(비공개) + OAC        : SPA 정적 파일
+ └── /api/*        → Lambda Function URL + OAC : 할일·루틴 API
 ```
 
 **같은 배포에 API를 붙이는 이유**: 동일 오리진이 되어 CORS가 사라지고, 세션 쿠키를
 `HttpOnly; Secure; SameSite=Lax`로 안전하게 쓸 수 있다. 도메인 하나만 관리하면 된다.
+
+**API Gateway 대신 Lambda Function URL + OAC를 쓴 이유** (설계 초안에서 바뀐 부분):
+Function URL을 `AWS_IAM` 인증으로 두고 CloudFront OAC가 SigV4로 서명하면,
+**CloudFront를 우회한 직접 호출이 불가능**하다. API Gateway 한 겹이 통째로 빠지면서
+보안은 오히려 강해지고 비용·지연도 줄어든다. (기존 Telegram webhook은 여전히
+`authType: NONE` + secret_token 검증 — 텔레그램이 CloudFront를 통과할 이유가 없으므로 그대로 둔다.)
+
+> ⚠️ **SPA 폴백을 `errorResponses`로 하면 안 된다.** CloudFront의 커스텀 에러 응답은
+> **배포 전체**에 걸려서 API가 낸 404까지 `index.html`(200)로 바꿔버린다.
+> 기본 behavior에만 붙는 **뷰어 요청 CloudFront Function**으로 처리한다.
 
 ### 인증 — Cognito 말고 Google OAuth 직접
 
 1인용이고, **어차피 Google Calendar refresh token이 필요하다.** 로그인 한 번으로
 신원 확인과 캘린더 권한을 같이 받는 게 부품이 가장 적다. (Slack 대신 Telegram을 고른 것과 같은 판단.)
 
-- Authorization Code + PKCE를 API Lambda가 직접 처리
-- 허용 이메일은 SSM `/hariesse/allowed-email` — 그 외 계정은 거부
-- 세션: HS256 JWT(수명 12h)를 HttpOnly 쿠키에. 서명키는 Secrets `hariesse/session-secret`
-- Google refresh token은 Secrets `hariesse/google-oauth`에 저장 (1인용이라 단일 시크릿으로 충분)
+- Authorization Code + PKCE를 API Lambda가 직접 처리 (`src/lib/google-oauth.ts`)
+- 허용 이메일은 SSM `/hariesse/allowed-email` — **비어 있으면 아무도 통과하지 못한다**(fail-closed)
+- 세션: HS256 서명 토큰(수명 12h)을 HttpOnly 쿠키에. 서명키는 Secrets `hariesse/session-secret`
+- PKCE verifier도 같은 방식으로 서명해 10분짜리 쿠키에 담는다 (Lambda가 무상태이므로)
+- id_token 서명 검증은 생략 — 브라우저를 거치지 않고 TLS로 토큰 엔드포인트에서 직접 받은 토큰이라
+  Google이 명시적으로 허용하는 경우다. 프론트에서 받은 토큰이라면 반드시 검증해야 한다
+- CSRF: `SameSite=Lax` + 동일 오리진이라 크로스 사이트 POST에 쿠키가 실리지 않는다
 
-> Cognito는 사용자 풀·그룹·MFA가 필요해질 때 옮기면 된다. 지금은 순수 비용(설정 + 토큰 중계).
+> Phase B의 scope는 `openid email profile`뿐이다. Phase C에서 `calendar.events`를
+> `GOOGLE_SCOPES`에 추가하고 **재로그인 1회**를 하면 된다.
 
-### API (전부 `/api` 아래, 세션 쿠키 필수)
+### API (전부 `/api` 아래, `/auth/*` 외에는 세션 쿠키 필수)
 
 | 메서드 | 경로 | 하는 일 |
 |---|---|---|
-| GET | `/routines` | 루틴 목록 |
-| POST | `/routines` | 루틴 생성 (`newId()`로 8hex) |
-| PUT/DELETE | `/routines/{id}` | 수정 / 삭제 |
-| GET | `/days/{date}` | `ensureDayPlan` 후 그날 할일 |
-| POST | `/days/{date}/tasks` | 단건(adhoc) 추가 |
-| PATCH | `/days/{date}/tasks/{sk}` | 상태 변경 |
-| GET | `/auth/login`, `/auth/callback` · POST `/auth/logout` | Google OAuth |
+| GET | `/me` | 로그인한 이메일 + 서버(KST) 기준 오늘 |
+| GET | `/auth/login` → `/auth/callback` · POST `/auth/logout` | Google OAuth |
+| GET · POST | `/routines` | 루틴 목록 / 생성 |
+| PUT · DELETE | `/routines/{id}` | 수정 / 삭제 |
+| GET | `/days/{date}` | `ensureDayPlan` 후 그날 할일 + 요약 |
+| POST | `/days/{date}/tasks` | 그날만 있는 단건 할일 추가 |
+| PATCH · DELETE | `/days/{date}/tasks/{sk}` | 상태 변경 / 단건 삭제 |
 
-핵심 로직(`src/lib/tasks.ts`, `src/domain/routine.ts`)은 **이미 Telegram 경로와 공용**이다.
-API Lambda는 얇은 HTTP 껍데기만 새로 쓰면 된다.
+핵심 로직(`src/lib/tasks.ts`, `src/domain/routine.ts`)은 **Telegram 경로와 공용**이다.
+API Lambda는 얇은 HTTP 껍데기 + 입력 검증(`parseRoutineInput` 등 순수함수)만 갖는다.
+
+**루틴을 고치면 앞으로 14일치 중 아직 `todo`인 전개분을 지운다**(`resyncRoutineDays`).
+다음 조회가 새 정의로 다시 만든다 — 이미 체크·스킵한 기록은 건드리지 않는다.
+Phase A의 "루틴을 고쳐도 반영 안 됨" 제약이 이걸로 해소됐다.
 
 ### 화면 (Vite + React + TS, `web/`)
 
-1. **오늘** — 체크리스트, 진행률. Telegram 버튼과 같은 상태를 본다.
-2. **주간 루틴** — 요일 × 루틴 그리드. 여기서 "월요일 = 토플 Reading, Listening"을 등록.
-3. **캘린더** — 월 뷰 (Phase C에서 Google 일정 병합)
+1. **오늘** — 날짜 이동, 체크/건너뛰기(낙관적 반영), 그날만 있는 할일 추가·삭제, 진행률 바.
+2. **주간 루틴** — 요일별로 묶어 보여주고, 폼에서 제목·요일·시간·소요·분류·메모·알림 슬롯을 편집.
 
-배포: `npm run build:web` → `BucketDeployment` + CloudFront invalidation. 새 스택 `HariesseWeb`.
+의존성은 React뿐 (UI 라이브러리 없음). 모바일 우선, `prefers-color-scheme` 다크모드.
+텔레그램과 나란히 폰에서 쓰는 화면이라 그렇게 잡았다.
+
+배포: `npm run deploy` = `build:web` → `cdk deploy --all`.
+`web/dist`가 없으면 안내 페이지만 올리고 **경고**를 낸다 (조용히 빈 사이트가 되지 않게).
 커스텀 도메인은 나중에 Route53 + ACM(**us-east-1** 인증서) 추가.
-
----
 
 ## 3. Phase C — Google Calendar 연동
 

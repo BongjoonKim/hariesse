@@ -11,9 +11,11 @@
     "test": "jest",
     "cdk": "cdk",
     "synth": "cdk synth",
-    "deploy": "cdk deploy --all",
+    "deploy": "npm run build:web && cdk deploy --all",
     "seed": "ts-node scripts/seed.ts",
-    "seed:routines": "ts-node scripts/seed-routines.ts"
+    "seed:routines": "ts-node scripts/seed-routines.ts",
+    "build:web": "npm --prefix web install --no-audit --no-fund && npm --prefix web run build",
+    "dev:web": "npm --prefix web run dev"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",

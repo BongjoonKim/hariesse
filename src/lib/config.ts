@@ -1,6 +1,7 @@
 import { SSMClient, GetParametersCommand } from '@aws-sdk/client-ssm';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 import { ENV, SSM, SECRETS, DEFAULTS } from './constants';
+import type { GoogleOAuthSecret } from './google-oauth';
 
 /**
  * SSM/Secrets에서 설정·시크릿을 1회 로드해 콜드스타트 동안 캐시.
@@ -26,6 +27,10 @@ export interface AppConfig {
   dailyBedrockCap: number;
   dailyCurateCap: number;
   digestSize: number;
+  /** 웹 로그인 허용 이메일 (쉼표 구분). 비면 아무도 못 들어온다. */
+  allowedEmail: string;
+  /** 웹 오리진 (CloudFront 도메인). OAuth redirect_uri의 출처 — 배포 후 SSM에 넣는다. */
+  webOrigin: string;
 }
 
 let cachedConfig: AppConfig | undefined;
@@ -54,6 +59,8 @@ export async function getConfig(): Promise<AppConfig> {
     SSM.DAILY_BEDROCK_CAP,
     SSM.DAILY_CURATE_CAP,
     SSM.DIGEST_SIZE,
+    SSM.ALLOWED_EMAIL,
+    SSM.WEB_ORIGIN,
   ];
 
   const res = await ssm.send(new GetParametersCommand({ Names: names }));
@@ -76,6 +83,8 @@ export async function getConfig(): Promise<AppConfig> {
     dailyBedrockCap: num(p[SSM.DAILY_BEDROCK_CAP], DEFAULTS.DAILY_BEDROCK_CAP),
     dailyCurateCap: num(p[SSM.DAILY_CURATE_CAP], DEFAULTS.DAILY_CURATE_CAP),
     digestSize: num(p[SSM.DIGEST_SIZE], DEFAULTS.DIGEST_SIZE),
+    allowedEmail: p[SSM.ALLOWED_EMAIL] ?? '',
+    webOrigin: (p[SSM.WEB_ORIGIN] ?? '').replace(/\/$/, ''),
   };
   return cachedConfig;
 }
@@ -93,3 +102,16 @@ export async function getSecret(name: string): Promise<string> {
 export const getTelegramBotToken = () => getSecret(SECRETS.TELEGRAM_BOT_TOKEN);
 export const getNotionToken = () => getSecret(SECRETS.NOTION_TOKEN);
 export const getTelegramWebhookSecret = () => getSecret(SECRETS.TELEGRAM_WEBHOOK_SECRET);
+export const getSessionSecret = () => getSecret(SECRETS.SESSION_SECRET);
+
+/** Secrets `hariesse/google-oauth` = {"clientId":"…","clientSecret":"…"} */
+export async function getGoogleOAuth(): Promise<GoogleOAuthSecret> {
+  const raw = await getSecret(SECRETS.GOOGLE_OAUTH);
+  try {
+    const parsed = JSON.parse(raw) as Partial<GoogleOAuthSecret>;
+    if (!parsed.clientId || !parsed.clientSecret) throw new Error('clientId/clientSecret 없음');
+    return { clientId: parsed.clientId, clientSecret: parsed.clientSecret };
+  } catch (err) {
+    throw new Error(`Secrets ${SECRETS.GOOGLE_OAUTH} 형식 오류: ${(err as Error).message}`);
+  }
+}

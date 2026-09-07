@@ -20,12 +20,15 @@
 >   (401 인증, like 반영, 중복 무시, Notion 상태=별표 전파 확인).
 > - **다음 할 일은 Phase 2 개인화** — Sources 가중치를 스코어링에 실제 반영, `isNovel` 하드코딩 교체.
 
-> 🆕 **비서(할일·일정) Phase A 구현 완료 — 아직 미배포.**
+> 🆕 **비서 Phase A(브리핑) + Phase B(웹 UI) 구현 완료 — 아직 미배포.**
 > 주간 반복 루틴을 등록해 두면 **09:00 / 12:00 / 20:00 KST** Telegram 브리핑으로 온다.
 > 항목마다 `[✅ 체크][⏭ 건너뛰기]` 버튼 → 기존 Feedback webhook이 상태를 바꾸고 메시지를 즉시 다시 그린다.
 > - 새 스택 `HariesseAssistant`(Brief Lambda + EventBridge 3개), 새 테이블 `Tasks`(pk/sk).
 > - 설계·로드맵 전체(웹 UI, Google Calendar, 자연어 등록)는 **[docs/ASSISTANT.md](./docs/ASSISTANT.md)**.
-> - 배포 절차는 아래 §4.1.
+> - **웹 UI**: CloudFront 배포 하나에 SPA(S3+OAC)와 API(Lambda Function URL+OAC)를 함께.
+>   Google 로그인(허용 이메일 1개), 오늘 화면 체크, 주간 루틴 편집.
+>   새 스택 `HariesseWeb`, 프론트는 `web/`(Vite+React).
+> - 배포 절차는 아래 §4.1(브리핑) / §4.2(웹).
 
 ---
 
@@ -135,6 +138,50 @@ aws lambda invoke --function-name <HariesseAssistant 출력 BriefFunctionName> \
 > ⚠️ Function URL webhook은 이미 등록돼 있어 재등록이 필요 없다 — 할일 버튼도 같은 webhook으로 들어온다.
 > 다만 FeedbackFn이 새 코드/환경변수(TASKS_TABLE)를 받으려면 이번 배포가 반드시 포함돼야 한다.
 
+### 4.2 웹 UI 배포 — Phase B
+
+**전제: Google Cloud OAuth 클라이언트 1개** (최초 1회).
+
+1. Google Cloud Console → 새 프로젝트 → **OAuth 동의 화면**
+   - User type `외부`, 게시하지 않아도 됨. **테스트 사용자에 본인 Gmail 추가**.
+2. **사용자 인증 정보 → OAuth 클라이언트 ID → 웹 애플리케이션** 생성.
+   승인된 리디렉션 URI는 아래 (4)에서 받는 값으로 나중에 채운다.
+3. 시크릿·파라미터 넣기
+   ```bash
+   R=ap-northeast-2
+   aws secretsmanager create-secret --name hariesse/google-oauth --region $R \
+     --secret-string '{"clientId":"…apps.googleusercontent.com","clientSecret":"…"}'
+   aws secretsmanager create-secret --name hariesse/session-secret --region $R \
+     --secret-string "$(openssl rand -base64 48)"
+   aws ssm put-parameter --name /hariesse/allowed-email --type String --region $R \
+     --value 'bongjoonkim96@gmail.com'      # 비어 있으면 아무도 로그인 못 한다 (fail-closed)
+   ```
+4. 배포 — 웹 빌드까지 한 번에
+   ```bash
+   npm run deploy      # = npm run build:web && cdk deploy --all
+   ```
+   출력에서 **`HariesseWeb.WebUrl`** 과 **`HariesseWeb.RedirectUri`** 를 받는다.
+5. 두 곳에 꽂는다
+   - `RedirectUri` → Google Console의 **승인된 리디렉션 URI**에 그대로 등록
+   - `WebUrl` → SSM에 저장
+     ```bash
+     aws ssm put-parameter --name /hariesse/web-origin --type String --overwrite \
+       --region ap-northeast-2 --value 'https://dxxxxxxxx.cloudfront.net'
+     ```
+6. **`WebApiFn` 콜드스타트 강제** — `config.ts`가 SSM을 콜드스타트에 캐시하므로,
+   `web-origin`을 넣은 뒤 Lambda 설정을 건드리거나 재배포해야 반영된다.
+
+**완료 기준**: `WebUrl` 접속 → "Google로 로그인" → 본인 계정으로 들어와
+주간 루틴을 등록하면, 그날 할일이 **오늘 탭**과 **텔레그램 브리핑** 양쪽에 같이 뜬다.
+
+> 프론트만 고칠 때는 `npm run dev:web` (Vite dev 서버). `/api`는 `HARIESSE_API` 환경변수로
+> 프록시할 수 있지만, 인증이 CloudFront 도메인 쿠키에 묶여 있어 실질적으로는 배포해서 확인하는 게 빠르다.
+
+> ⚠️ **리전 주의.** `bin/app.ts`가 `process.env.CDK_DEFAULT_REGION ?? 'ap-northeast-2'`라
+> 셸의 AWS 설정이 다른 리전을 가리키면 **거기에 스택이 통째로 생긴다**
+> (이 저장소를 자격증명 없이 synth하면 실제로 us-east-1로 잡힌다).
+> 배포 전 `aws configure get region` 확인하거나 `AWS_REGION=ap-northeast-2 npm run deploy`로 못박을 것.
+
 > 배포는 비용이 발생한다. 개인 사용 수준이면 월 몇 달러 안쪽 (DynamoDB on-demand + Lambda 소액 + Bedrock 호출당). 최대 변수는 Bedrock이고 일일 캡 50회가 걸려 있다.
 
 ---
@@ -145,11 +192,11 @@ aws lambda invoke --function-name <HariesseAssistant 출력 BriefFunctionName> \
 |---|---|
 | 작업 디렉토리 | `/Users/zayeonic/Projects/haries-work/hariesse` |
 | AWS 계정 / 리전 | `611288736262` / `ap-northeast-2` (IAM user `nadeliv_adm`) |
-| CDK 스택 | `HariesseData`, `HariessePipeline`, `HariesseApi`, `HariesseAssistant` |
+| CDK 스택 | `HariesseData`, `HariessePipeline`, `HariesseApi`, `HariesseAssistant`, `HariesseWeb` |
 | Notion 부모 페이지 | "My secretary" `38de549ed10280e6af9be92c7a6bfb3f` |
 | Notion DB | "hariesse Archive" `a22cbf53637840dc867d6cd8e7b2614e` |
 | Telegram 봇 | `@haries_work_bot`, chat_id `8657904581` |
-| Secrets Manager | `hariesse/telegram-bot-token`, `hariesse/notion-token` |
+| Secrets Manager | `hariesse/telegram-bot-token`, `hariesse/notion-token`, `hariesse/telegram-webhook-secret`, `hariesse/google-oauth`, `hariesse/session-secret` |
 | SSM (설정됨) | `/hariesse/telegram-chat-id`, `/hariesse/notion-database-id` |
 | SSM (미설정, 코드 기본값 사용) | `bedrock-model-id`, `bedrock-region`, `exploration-ratio`, `daily-bedrock-cap`, `daily-curate-cap`, `digest-size` |
 | 스케줄 (콘텐츠) | 매일 **07:00 KST** (= 22:00 UTC) |
@@ -193,7 +240,7 @@ aws lambda invoke --function-name <HariesseAssistant 출력 BriefFunctionName> \
 
 ### 비서 트랙 (docs/ASSISTANT.md)
 - **Phase A ✅** 루틴 → 하루 3회 브리핑 → 버튼 체크 (구현 완료, 미배포)
-- **Phase B** 웹 관리 UI — S3+CloudFront 한 배포에 `/api/*`까지, Google OAuth 직접(Cognito 아님)
+- **Phase B ✅** 웹 관리 UI — S3+CloudFront 한 배포에 `/api/*`까지, Google OAuth 직접 (구현 완료, 미배포)
 - **Phase C** Google Calendar — 읽기는 Google→hariesse, 쓰기는 루틴만 전용 캘린더로
 - **Phase D** 자연어 등록("매주 화 8시 헬스"), 저녁 회고 코멘트, 주간 리포트
 
@@ -213,5 +260,9 @@ aws lambda invoke --function-name <HariesseAssistant 출력 BriefFunctionName> \
 - **macOS 셸** → `head -n -1` 같은 GNU 전용 옵션 안 먹는다.
 - **EventBridge cron은 UTC** → KST 09/12/20시는 UTC 00/03/11시. 한국은 서머타임이 없어 고정 -9시간 환산이면 정확하다.
   `SLOT_HOUR_KST`(`src/domain/routine.ts`)가 단일 출처라 시간을 바꾸면 스택이 따라간다.
+- **CloudFront `errorResponses`는 배포 전체에 걸린다** → SPA 폴백으로 쓰면 API의 404까지
+  index.html(200)로 바뀐다. 기본 behavior에만 붙는 뷰어 CloudFront Function으로 처리했다.
+- **`/hariesse/web-origin`은 배포 후에만 알 수 있다** (CloudFront 도메인). 닭-달걀이라
+  §4.2처럼 배포 → SSM 기입 → 콜드스타트 순서를 지켜야 로그인이 된다.
 - **`Tasks` 테이블은 RemovalPolicy.RETAIN** → 직접 등록한 루틴은 스택을 지워도 남는다.
   스택을 지웠다 다시 만들면 같은 이름의 테이블이 남아 있어 배포가 실패할 수 있다.

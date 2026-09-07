@@ -23,6 +23,9 @@ export const SSM = {
   DAILY_BEDROCK_CAP: '/hariesse/daily-bedrock-cap',
   DAILY_CURATE_CAP: '/hariesse/daily-curate-cap',
   DIGEST_SIZE: '/hariesse/digest-size',
+  // 웹 UI
+  ALLOWED_EMAIL: '/hariesse/allowed-email',
+  WEB_ORIGIN: '/hariesse/web-origin',
 } as const;
 
 // Secrets Manager 시크릿 이름 (민감 토큰)
@@ -30,6 +33,8 @@ export const SECRETS = {
   TELEGRAM_BOT_TOKEN: 'hariesse/telegram-bot-token',
   NOTION_TOKEN: 'hariesse/notion-token',
   TELEGRAM_WEBHOOK_SECRET: 'hariesse/telegram-webhook-secret',
+  GOOGLE_OAUTH: 'hariesse/google-oauth',
+  SESSION_SECRET: 'hariesse/session-secret',
 } as const;
 
 // 기본값 (SSM 미설정 시 폴백)
@@ -44,4 +49,6 @@ export const DEFAULTS = {
   ARTICLE_TTL_DAYS: 30,
   /** 하루 할일 아이템 보존 기간 — 스트릭/회고용으로 1년 남긴다. */
   TASK_TTL_DAYS: 365,
+  /** 루틴을 고쳤을 때 다시 전개할 앞으로의 일수 (아직 todo인 것만). */
+  ROUTINE_RESYNC_DAYS: 14,
 } as const;

@@ -4,6 +4,7 @@ import { DataStack } from '../lib/stacks/data-stack';
 import { PipelineStack } from '../lib/stacks/pipeline-stack';
 import { ApiStack } from '../lib/stacks/api-stack';
 import { AssistantStack } from '../lib/stacks/assistant-stack';
+import { WebStack } from '../lib/stacks/web-stack';
 
 const app = new cdk.App();
 
@@ -38,6 +39,15 @@ new ApiStack(app, 'HariesseApi', {
   articlesTable: data.articlesTable,
   profileTable: data.profileTable,
   tasksTable: data.tasksTable,
+  rawBucket: data.rawBucket,
+});
+
+new WebStack(app, 'HariesseWeb', {
+  env,
+  tasksTable: data.tasksTable,
+  sourcesTable: data.sourcesTable,
+  articlesTable: data.articlesTable,
+  profileTable: data.profileTable,
   rawBucket: data.rawBucket,
 });
 

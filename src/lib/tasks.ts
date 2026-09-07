@@ -2,7 +2,7 @@ import { randomBytes } from 'crypto';
 import { GetCommand, PutCommand, UpdateCommand, DeleteCommand, QueryCommand } from '@aws-sdk/lib-dynamodb';
 import { doc } from './dynamo';
 import { DEFAULTS } from './constants';
-import { dayPk, planForDay } from '../domain/routine';
+import { dayPk, planForDay, shiftDate } from '../domain/routine';
 import type { Routine, TaskInstance, TaskStatus } from './types';
 
 /**
@@ -146,4 +146,26 @@ export async function setTaskStatus(
     if ((err as { name?: string }).name === 'ConditionalCheckFailedException') return undefined;
     throw err;
   }
+}
+
+/**
+ * 루틴을 고치거나 지웠을 때, 앞으로 며칠치 중 **아직 todo인 루틴 전개분만** 지운다.
+ * 다음 조회(`ensureDayPlan`)가 새 정의로 다시 만든다. 이미 체크/스킵한 기록은 건드리지 않는다.
+ */
+export async function resyncRoutineDays(
+  table: string,
+  routineId: string,
+  fromDate: string,
+  days: number = DEFAULTS.ROUTINE_RESYNC_DAYS
+): Promise<number> {
+  let removed = 0;
+  for (let i = 0; i < days; i += 1) {
+    const date = shiftDate(fromDate, i);
+    const existing = await getTask(table, date, routineId);
+    if (existing?.origin === 'routine' && existing.status === 'todo') {
+      await deleteTask(table, date, routineId);
+      removed += 1;
+    }
+  }
+  return removed;
 }
