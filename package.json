@@ -12,7 +12,8 @@
     "cdk": "cdk",
     "synth": "cdk synth",
     "deploy": "cdk deploy --all",
-    "seed": "ts-node scripts/seed.ts"
+    "seed": "ts-node scripts/seed.ts",
+    "add-source": "ts-node scripts/add-source.ts"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",

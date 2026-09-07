@@ -6,14 +6,16 @@
 > 📌 **세션을 이어받는 중이라면 [HANDOFF.md](./HANDOFF.md)를 먼저 읽을 것.**
 > 현재 상태, 검증 결과, 다음 실행할 명령어, 결정 이력이 모두 거기 있다.
 > **요약: 2026-07-20 배포 + E2E 검증 완료. Feedback 증분(Telegram 버튼 + ApiStack)도 배포·검증 완료.**
+> **2026-09-06 소스 확장 증분: YouTube + Reddit 수집 어댑터 추가 (코드 완료, 재배포 필요).**
 > **다음 증분은 Phase 2 개인화(가중치 학습 슬롯 반영, isNovel 실제 신호) — HANDOFF §7 로드맵 참고.**
 
-## 현재 상태: Phase 1 + Feedback 증분
+## 현재 상태: Phase 1 + Feedback + 소스 확장
 `Collection → Curation → Delivery → Feedback` 루프가 끝까지 동작.
 - 다이제스트 항목마다 인라인 버튼 `[👍 좋아요][⭐ 사이트 좋아요][💾 nadeliv 글감][⏭ 건너뛰기]`
   → Feedback Lambda가 Sources 가중치 ±, Profile 관심사 누적, Notion 상태 갱신 (액션당 1회 idempotent).
+- 소스 타입 3종: **blog RSS / YouTube 채널 / Reddit 서브레딧** (`Source.type`, 기본 `blog`).
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
-  Discovery 파이프라인, layoutType, YouTube/arXiv/HN/Reddit 소스 확장.
+  Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 
 ## 아키텍처
 - **DataStack**: DynamoDB `Sources`/`Articles`/`Profile` + S3(raw 본문).
@@ -23,15 +25,24 @@
 
 ## 데이터 흐름
 ```
-EventBridge(매일) → SFN: Collect(RSS fetch+dedup+본문 S3) → Curate(Bedrock 점수/요약/AI의견/태그)
+EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → Curate(Bedrock 점수/요약/AI의견/태그)
                          → Deliver(활용70/탐험30 → Telegram + Notion upsert)
 ```
+
+### 소스 타입별 수집 방식 (`src/lib/collectors.ts`)
+| 타입 | feedUrl 저장 형태 | 본문 | 다이제스트 링크 |
+|---|---|---|---|
+| `blog` | RSS URL 그대로 | 원문 페이지 Readability 추출 | 원문 |
+| `youtube` | 채널 ID `UC...` | 영상 설명(media:description). **페이지 추출 안 함** | 영상 |
+| `reddit` | `r/<sub>` | 링크글=외부 원문 추출 / 자기글=selftext | 링크글은 원문(+`💬 토론` 줄에 스레드) |
 
 ## 코드 맵
 - `src/lib/config.ts` — SSM/Secrets 로드(콜드스타트 캐시). `getConfig()`, `getSecret()`.
 - `src/lib/constants.ts` — ENV 키, SSM 경로, Secrets 이름, 기본값. **값은 두지 않음.**
 - `src/lib/dynamo.ts` — 테이블 CRUD + `hashUrl`(articleId/dedup), `hashDomain`(siteId).
 - `src/lib/extract.ts` — HTML→본문(`extractReadable` 순수함수, 테스트 대상) + `fetchAndExtract`.
+- `src/lib/collectors.ts` — 소스 타입별 수집 어댑터. URL 정규화·항목 파싱은 순수함수(테스트 대상),
+  네트워크는 `fetchSourceItems` 하나에만.
 - `src/lib/bedrock.ts` — `curateArticle()` 큐레이션 프롬프트 → JSON.
 - `src/lib/telegram.ts` / `notion.ts` — 다이제스트 전송(+인라인 버튼) / URL 기준 upsert.
 - `src/domain/scoring.ts` — `rankAndSplit()` 활용/탐험 분배(순수함수, 테스트 대상).
@@ -44,7 +55,11 @@ EventBridge(매일) → SFN: Collect(RSS fetch+dedup+본문 S3) → Curate(Bedro
 - **TTL**: Articles `ttl`(기본 30일)로 미독 자동 정리.
 - **동시성**: Lambda `reservedConcurrentExecutions: 2`. DynamoDB on-demand.
 - **탐험/활용**: 매 다이제스트 explore 비율 = `EXPLORATION_RATIO`(기본 0.3). 에코챔버 방지 — 이 분배를 함부로 0으로 만들지 말 것.
-- **순수함수 우선**: 스코어링/추출 로직은 네트워크와 분리해 단위테스트 가능하게.
+- **순수함수 우선**: 스코어링/추출/피드파싱 로직은 네트워크와 분리해 단위테스트 가능하게.
+- **소스 추가는 파괴적이지 않게**: seed/add-source는 `putSourceIfNew`(조건부 put)만 쓴다.
+  덮어쓰면 피드백으로 쌓인 `weight`/`likeCount`가 날아간다.
+- **Reddit 레이트리밋**: 익명 요청은 금방 429가 나고 한동안 안 풀린다.
+  `collectors.ts`의 호출 간격(4초) + 백오프 재시도를 줄이지 말 것.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.
 
 ## 설정값 위치
@@ -63,5 +78,12 @@ npx cdk bootstrap        # 최초 1회
 npx cdk deploy --all
 # 배포 후: SSM/Secrets 값 입력 → seed → 상태머신 수동 실행
 SOURCES_TABLE=<out> PROFILE_TABLE=<out> AWS_REGION=ap-northeast-2 npm run seed
+
+# 소스 1건 추가 (YouTube @handle은 채널 ID로 자동 변환, 저장 전 피드 생존 확인)
+SOURCES_TABLE=<out> AWS_REGION=ap-northeast-2 \
+  npm run add-source -- --type youtube --url @ThePrimeagen --category dev-ai
+SOURCES_TABLE=<out> AWS_REGION=ap-northeast-2 \
+  npm run add-source -- --type reddit --url r/rust --category dev-ai
+# --dry-run 이면 AWS 없이 검증만
 ```
 완료 기준: 매일 다이제스트가 오고, Notion에 글이 쌓인다.

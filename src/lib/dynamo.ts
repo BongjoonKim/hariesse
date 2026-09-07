@@ -45,6 +45,26 @@ export async function putSource(table: string, source: Source): Promise<void> {
   await doc.send(new PutCommand({ TableName: table, Item: source }));
 }
 
+/**
+ * 이미 있는 소스는 건드리지 않는 put. 시드/소스 추가 스크립트를 여러 번 돌려도
+ * 피드백으로 쌓인 weight/likeCount가 초기화되지 않는다. 새로 넣었으면 true.
+ */
+export async function putSourceIfNew(table: string, source: Source): Promise<boolean> {
+  try {
+    await doc.send(
+      new PutCommand({
+        TableName: table,
+        Item: source,
+        ConditionExpression: 'attribute_not_exists(siteId)',
+      })
+    );
+    return true;
+  } catch (err) {
+    if ((err as Error).name === 'ConditionalCheckFailedException') return false;
+    throw err;
+  }
+}
+
 export async function markSourceCrawled(
   table: string,
   siteId: string,

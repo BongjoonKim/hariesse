@@ -39,6 +39,7 @@ export const handler = async (): Promise<CurateResult> => {
         title: article.title,
         url: article.url,
         category: article.category,
+        sourceType: article.source,
         bodyText,
         interests,
       });

@@ -20,6 +20,18 @@
 >   (401 인증, like 반영, 중복 무시, Notion 상태=별표 전파 확인).
 > - **다음 할 일은 Phase 2 개인화** — Sources 가중치를 스코어링에 실제 반영, `isNovel` 하드코딩 교체.
 
+> 🆕 **2026-09-06 소스 확장 증분 (코드 완료 · 배포 대기).**
+> `Source.type`으로 **blog / youtube / reddit** 수집을 분기한다 (`src/lib/collectors.ts`).
+> - YouTube: 채널 RSS(`feeds/videos.xml?channel_id=UC...`), 본문 = 영상 설명. 페이지 추출은 안 한다(Readability로 안 나옴).
+> - Reddit: 서브레딧 RSS(`r/<sub>/top/.rss?t=day`). 링크글은 **외부 원문**을 저장·추출하고
+>   댓글 스레드를 `discussionUrl`로 남겨 Telegram에 `💬 토론` 줄로 보여준다. 자기글은 selftext.
+> - Telegram 항목 제목에 소스 아이콘(📝/📺/👽), 큐레이션 프롬프트에 소스 특성 힌트 추가.
+> - `scripts/add-source.ts` (`npm run add-source`) — 소스 1건 추가 CLI. YouTube `@handle` → 채널 ID 자동 변환,
+>   저장 전 피드 생존 확인, `--dry-run` 지원.
+> - seed/add-source 모두 `putSourceIfNew` — **재실행해도 기존 소스의 weight를 덮지 않는다.**
+> - 실측 검증(로컬): Fireship 15건 / r/programming·r/LocalLLaMA·r/aws·r/solotravel 정상 파싱 / 토스 20건.
+> - **배포 필요**: `npx cdk deploy --all` 후 `npm run seed`(신규 소스 10건만 추가됨).
+
 ---
 
 ## 1. 프로젝트가 뭔가
@@ -127,7 +139,12 @@ aws stepfunctions start-execution \
 | SSM (미설정, 코드 기본값 사용) | `bedrock-model-id`, `bedrock-region`, `exploration-ratio`, `daily-bedrock-cap`, `daily-curate-cap`, `digest-size` |
 | 스케줄 | 매일 **07:00 KST** (= 22:00 UTC) |
 
-시드 소스 3개: AWS Architecture Blog(cloud), 우아한형제들(dev-ai), 토스(dev-ai).
+시드 소스 13개 (`scripts/seed.ts`):
+- blog(3): AWS Architecture Blog(cloud), 우아한형제들(dev-ai), 토스(dev-ai)
+- youtube(4): Fireship, Two Minute Papers, 노마드 코더(dev-ai), Amazon Web Services(cloud)
+- reddit(6): r/programming, r/LocalLLaMA, r/MachineLearning(dev-ai), r/aws, r/devops(cloud), r/solotravel(travel)
+
+신규 소스는 weight 0.8로 시작(기존 블로그 1.0보다 낮게) — 피드백으로 올라가게 둔다.
 
 > ⚠️ 이 디렉토리는 **git 저장소가 아니다.** 배포 전에 `git init` 하는 걸 권장.
 
@@ -166,7 +183,8 @@ aws stepfunctions start-execution \
 ### Phase 3 — 발견·고도화
 - 신규 사이트 자동 발견(Discovery) + candidate 시범 노출
 - `layoutType` 분석, AI 의견 프롬프트 고도화
-- YouTube/arXiv/HackerNews/Reddit 소스 확장
+- arXiv/HackerNews 소스 확장 (YouTube/Reddit은 2026-09-06 완료)
+- YouTube 자막 수집 — 설명글만으로는 요약 품질에 한계가 있다
 
 ---
 
@@ -177,3 +195,11 @@ aws stepfunctions start-execution \
 - **Bedrock 모델 ID** → 서울은 교차리전 추론 프로파일(`apac.*` / `global.*`) 사용. 비용 절감하려면
   `global.anthropic.claude-haiku-4-5-20251001-v1:0`, 품질 우선이면 `global.anthropic.claude-sonnet-4-5-20250929-v1:0`로 SSM 덮어쓰기.
 - **macOS 셸** → `head -n -1` 같은 GNU 전용 옵션 안 먹는다.
+- **Reddit 레이트리밋** → 익명 요청은 금방 429가 나고 한 번 걸리면 수십 초 안 풀린다.
+  `collectors.ts`의 `REDDIT_POLICY`(호출 간격 20초 + 30초 백오프 1회)를 줄이지 말 것.
+  그래도 일부 서브레딧이 실패할 수 있는데, collect는 실패 소스를 건너뛰고 계속 간다
+  (`failedSources` 카운트로 로그에 남음). `.json` 엔드포인트는 UA를 붙여도 403이라 안 쓴다.
+- **YouTube 채널 ID** → `@handle`은 바뀔 수 있어 채널 ID(`UC...`)로 저장한다.
+  핸들→ID 변환은 네트워크가 필요해서 런타임(Lambda)이 아니라 `scripts/add-source.ts`에서만 한다.
+- **소스 재시드** → `putSourceIfNew`라 기존 소스는 그대로 둔다. 소스 설정을 **바꾸고 싶으면**
+  덮어쓰기가 아니라 콘솔/CLI로 해당 항목만 수정할 것 (weight 초기화 사고 방지).

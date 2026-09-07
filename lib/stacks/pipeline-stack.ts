@@ -54,7 +54,8 @@ export class PipelineStack extends cdk.Stack {
         bundling,
       });
 
-    const collectFn = makeFn('CollectFn', 'collect', 10, 1024);
+    // YouTube/Reddit 소스가 늘면서 소스당 fetch + 본문 추출 시간이 길어졌다.
+    const collectFn = makeFn('CollectFn', 'collect', 14, 1024);
     const curateFn = makeFn('CurateFn', 'curate', 15, 512);
     const deliverFn = makeFn('DeliverFn', 'deliver', 5, 512);
 

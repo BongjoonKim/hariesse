@@ -8,6 +8,8 @@ export interface Source {
   domain: string;
   name: string;
   category: Category;
+  /** 소스 종류. 없으면 'blog'(RSS 원문) 취급 — 수집 어댑터 선택에 쓰인다. */
+  type?: SourceType;
   feedUrl?: string;
   weight: number;
   likeCount: number;
@@ -34,6 +36,8 @@ export interface Article {
   liked?: boolean;
   nadelivCandidate?: boolean;
   slot?: Slot;
+  /** 원문과 별개의 토론 링크 (Reddit 링크글의 댓글 스레드 등) */
+  discussionUrl?: string;
   textS3Key?: string;
   collectedAt: string;
   curatedAt?: string;

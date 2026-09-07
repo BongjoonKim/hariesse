@@ -2,7 +2,7 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
-import type { Curation } from './types';
+import type { Curation, SourceType } from './types';
 
 let client: BedrockRuntimeClient | undefined;
 function getClient(region: string): BedrockRuntimeClient {
@@ -16,7 +16,16 @@ export interface CurateInput {
   category: string;
   bodyText: string;
   interests: Record<string, number>;
+  sourceType?: SourceType;
 }
+
+/** 소스 종류별 평가 맥락 — 본문의 성격이 달라서 그냥 두면 점수가 왜곡된다. */
+const SOURCE_HINT: Partial<Record<SourceType, string>> = {
+  youtube:
+    'YouTube 영상이다. 본문은 영상 설명글이라 짧을 수 있으니, 분량이 아니라 주제 자체의 가치로 평가하라. 요약은 "이 영상이 다루는 내용"으로 써라.',
+  reddit:
+    'Reddit에서 상위 노출된 글이다. 커뮤니티가 주목했다는 신호를 감안하되, 낚시성 제목이면 점수를 낮춰라.',
+};
 
 const SYSTEM_PROMPT = `너는 사용자의 개인 콘텐츠 비서다. 글을 읽고 사용자 취향과의 적합도를 평가한다.
 단순 패턴매칭이 아니라, "취향엔 안 맞지만 알 가치가 있는지"까지 판단해 추천이유(aiOpinion)에 담아라.
@@ -29,8 +38,9 @@ function buildUserPrompt(input: CurateInput): string {
     .map(([k, v]) => `${k}(${v})`)
     .join(', ');
   const body = input.bodyText.slice(0, 6000);
+  const hint = input.sourceType ? SOURCE_HINT[input.sourceType] : undefined;
   return `사용자 관심사(가중치): ${interests || '없음'}
-카테고리: ${input.category}
+카테고리: ${input.category}${hint ? `\n소스 특성: ${hint}` : ''}
 제목: ${input.title}
 URL: ${input.url}
 

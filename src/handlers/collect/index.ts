@@ -1,4 +1,3 @@
-import Parser from 'rss-parser';
 import { getConfig } from '../../lib/config';
 import {
   getActiveSources,
@@ -7,12 +6,11 @@ import {
   markSourceCrawled,
   hashUrl,
 } from '../../lib/dynamo';
+import { fetchSourceItems, sourceType } from '../../lib/collectors';
 import { fetchAndExtract } from '../../lib/extract';
 import { putRawText } from '../../lib/storage';
 import { DEFAULTS } from '../../lib/constants';
 import type { Article, Source } from '../../lib/types';
-
-const parser = new Parser({ timeout: 12000 });
 
 // 사이트당 최대 신규 글 수 (가중치로 스케일).
 const MAX_PER_SOURCE = 5;
@@ -21,6 +19,7 @@ interface CollectResult {
   collected: number;
   scanned: number;
   sources: number;
+  failedSources: number;
 }
 
 function itemsPerSource(source: Source): number {
@@ -39,27 +38,31 @@ export const handler = async (): Promise<CollectResult> => {
 
   let collected = 0;
   let scanned = 0;
+  let failedSources = 0;
   const dailyCap = cfg.dailyCurateCap; // 하루 신규 글 캡 (가드레일)
 
   for (const source of sources) {
     if (collected >= dailyCap) break;
     if (!source.feedUrl) continue;
 
-    let feed;
+    // 타입별 어댑터(blog RSS / YouTube / Reddit)가 표준 항목으로 정규화해 돌려준다.
+    let items;
     try {
-      feed = await parser.parseURL(source.feedUrl);
+      items = await fetchSourceItems(source);
     } catch (err) {
-      console.warn(`feed 파싱 실패 ${source.feedUrl}: ${(err as Error).message}`);
+      console.warn(
+        `소스 수집 실패 [${sourceType(source)}] ${source.name}: ${(err as Error).message}`
+      );
+      failedSources++;
       continue;
     }
 
     const limit = itemsPerSource(source);
     let takenFromSource = 0;
 
-    for (const item of feed.items ?? []) {
+    for (const item of items) {
       if (collected >= dailyCap || takenFromSource >= limit) break;
-      const url = item.link?.trim();
-      if (!url) continue;
+      const url = item.url;
       scanned++;
 
       const articleId = hashUrl(url);
@@ -67,16 +70,19 @@ export const handler = async (): Promise<CollectResult> => {
       const existing = await getArticle(cfg.articlesTable, articleId);
       if (existing) continue;
 
-      // 본문 추출 (실패 시 RSS 콘텐츠로 폴백)
-      let title = item.title?.trim() || url;
-      let text = '';
-      try {
-        const extracted = await fetchAndExtract(url);
-        title = extracted.title || title;
-        text = extracted.text;
-      } catch (err) {
-        console.warn(`본문 추출 실패 ${url}: ${(err as Error).message}`);
-        text = (item.contentSnippet || item.content || '').trim();
+      // 본문 추출 (extractUrl이 있는 소스만. 실패 시 소스가 준 텍스트로 폴백)
+      let title = item.title;
+      let text = item.text ?? '';
+      if (item.extractUrl) {
+        try {
+          const extracted = await fetchAndExtract(item.extractUrl);
+          if (extracted.text) {
+            text = extracted.text;
+            if (!item.preferSourceTitle && extracted.title) title = extracted.title;
+          }
+        } catch (err) {
+          console.warn(`본문 추출 실패 ${item.extractUrl}: ${(err as Error).message}`);
+        }
       }
       if (!text) continue;
 
@@ -88,11 +94,12 @@ export const handler = async (): Promise<CollectResult> => {
         title,
         siteId: source.siteId,
         category: source.category,
-        source: 'blog',
+        source: sourceType(source),
         status: 'unread',
         textS3Key,
         collectedAt: nowIso,
         ttl,
+        ...(item.discussionUrl ? { discussionUrl: item.discussionUrl } : {}),
       };
 
       const isNew = await putArticleIfNew(cfg.articlesTable, article);
@@ -105,6 +112,8 @@ export const handler = async (): Promise<CollectResult> => {
     await markSourceCrawled(cfg.sourcesTable, source.siteId, nowIso);
   }
 
-  console.log(`collect 완료: ${collected}건 신규 (${scanned} 스캔, ${sources.length} 소스)`);
-  return { collected, scanned, sources: sources.length };
+  console.log(
+    `collect 완료: ${collected}건 신규 (${scanned} 스캔, ${sources.length} 소스, 실패 ${failedSources})`
+  );
+  return { collected, scanned, sources: sources.length, failedSources };
 };
