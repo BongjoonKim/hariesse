@@ -58,6 +58,8 @@ export class PipelineStack extends cdk.Stack {
     const collectFn = makeFn('CollectFn', 'collect', 14, 1024);
     const curateFn = makeFn('CurateFn', 'curate', 15, 512);
     const deliverFn = makeFn('DeliverFn', 'deliver', 5, 512);
+    // 학습 레슨 — Bedrock 1회 + Telegram/Notion. 다이제스트 파이프라인과 독립.
+    const learnFn = makeFn('LearnFn', 'learn', 3, 512);
 
     // ---- IAM (최소권한) ----
     // SSM 파라미터 읽기
@@ -67,7 +69,7 @@ export class PipelineStack extends cdk.Stack {
         `arn:aws:ssm:${this.region}:${this.account}:parameter/hariesse/*`,
       ],
     });
-    [collectFn, curateFn, deliverFn].forEach((fn) => fn.addToRolePolicy(ssmStmt));
+    [collectFn, curateFn, deliverFn, learnFn].forEach((fn) => fn.addToRolePolicy(ssmStmt));
 
     // DynamoDB
     sourcesTable.grantReadWriteData(collectFn);
@@ -80,27 +82,28 @@ export class PipelineStack extends cdk.Stack {
 
     articlesTable.grantReadWriteData(deliverFn);
 
-    // Bedrock (curate만) — foundation model + 교차리전 추론 프로파일
-    curateFn.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['bedrock:InvokeModel'],
-        resources: [
-          'arn:aws:bedrock:*::foundation-model/*',
-          `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
-        ],
-      })
-    );
+    profileTable.grantReadWriteData(learnFn); // 진도 = pk 'LEARNING'
+    articlesTable.grantReadData(learnFn); // 관련 글 찾기
 
-    // Secrets (deliver만) — Telegram + Notion 토큰
-    deliverFn.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['secretsmanager:GetSecretValue'],
-        resources: [
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${SECRETS.TELEGRAM_BOT_TOKEN}-*`,
-          `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${SECRETS.NOTION_TOKEN}-*`,
-        ],
-      })
-    );
+    // Bedrock (curate, learn) — foundation model + 교차리전 추론 프로파일
+    const bedrockStmt = new iam.PolicyStatement({
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/*',
+        `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
+      ],
+    });
+    [curateFn, learnFn].forEach((fn) => fn.addToRolePolicy(bedrockStmt));
+
+    // Secrets (deliver, learn) — Telegram + Notion 토큰
+    const secretsStmt = new iam.PolicyStatement({
+      actions: ['secretsmanager:GetSecretValue'],
+      resources: [
+        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${SECRETS.TELEGRAM_BOT_TOKEN}-*`,
+        `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${SECRETS.NOTION_TOKEN}-*`,
+      ],
+    });
+    [deliverFn, learnFn].forEach((fn) => fn.addToRolePolicy(secretsStmt));
 
     // ---- Step Functions: Collect → Curate → Deliver ----
     const collectTask = new tasks.LambdaInvoke(this, 'Collect', {
@@ -130,6 +133,13 @@ export class PipelineStack extends cdk.Stack {
       targets: [new targets.SfnStateMachine(stateMachine)],
     });
 
+    // ---- 학습 레슨: 매일 20:00 KST (= 11:00 UTC) — 아침 다이제스트와 겹치지 않게 저녁에 ----
+    new events.Rule(this, 'DailyLearningSchedule', {
+      schedule: events.Schedule.cron({ minute: '0', hour: '11' }),
+      targets: [new targets.LambdaFunction(learnFn)],
+    });
+
+    new cdk.CfnOutput(this, 'LearnFunctionName', { value: learnFn.functionName });
     new cdk.CfnOutput(this, 'StateMachineArn', { value: stateMachine.stateMachineArn });
     new cdk.CfnOutput(this, 'SsmPrefix', { value: '/hariesse/' });
     new cdk.CfnOutput(this, 'NotionDbParam', { value: SSM.NOTION_DATABASE_ID });

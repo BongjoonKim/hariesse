@@ -66,3 +66,20 @@ export interface Curation {
   aiOpinion: string;
   tags: string[];
 }
+
+/** Bedrock이 쓴 학습 레슨 본문 (구조화 — 포맷은 telegram/notion이 담당) */
+export interface LessonContent {
+  /** 한 줄 요약 */
+  summary: string;
+  /** 핵심 개념 설명 */
+  concept: string;
+  /** 실무·AI 활용 관점에서 왜 중요한지 */
+  whyItMatters: string;
+  keyPoints: string[];
+  example?: { lang: string; code: string; note?: string };
+  /** AI 코딩 도구에 시킬 때 쓸 프롬프트 예시 + 검증 포인트 */
+  aiTip: string;
+  /** 10분 실습 과제 */
+  practice: string;
+  quiz?: { question: string; answer: string };
+}

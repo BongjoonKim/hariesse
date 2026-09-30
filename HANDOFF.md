@@ -32,6 +32,21 @@
 > - 실측 검증(로컬): Fireship 15건 / r/programming·r/LocalLLaMA·r/aws·r/solotravel 정상 파싱 / 토스 20건.
 > - **배포 필요**: `npx cdk deploy --all` 후 `npm run seed`(신규 소스 10건만 추가됨).
 
+> 🆕 **2026-09-30 학습 트랙 증분 (코드 완료 · 배포 대기).**
+> 목적: AI를 잘 쓰기 위한 기본기(cloud / backend / frontend / cicd)를 매일 조금씩. 다이제스트와 별개 메시지.
+> - `LearnFn` + EventBridge **매일 20:00 KST (11:00 UTC)**. Bedrock이 레슨 1건을 JSON으로 쓰고
+>   (개념 / 왜 중요한가 / 핵심 / 예제 코드 / AI에게 시킬 때 / 10분 실습 / 퀴즈(스포일러)), Telegram 전송 + Notion "학습노트" 페이지 생성.
+> - 커리큘럼 `src/domain/curriculum.ts`: Kubernetes·Jenkins·Node.js·Langflow·React 5트랙 × 9레슨 = 45레슨.
+>   트랙 라운드로빈 → 각 트랙은 순서대로. 다 돌면 심화 모드로 재순환. 공식 문서 링크 전부 2026-09-30 200 확인.
+> - 버튼: `✅ 이해했어요`(완료 기록, 진도 표시에 반영) / `🔁 쉽게 다시`(다음 회차에 그 레슨을 쉬운 버전으로). Feedback Lambda가 `l1|` prefix로 처리.
+> - 레슨에 "📎 hariesse가 모아둔 관련 글" 최대 2건 — 수집된 글 중 트랙 키워드 매칭, 점수 50+.
+> - seed에 학습 연계 소스 10건 추가 (Kubernetes/CNCF/Jenkins/Node.js/Langflow/React/web.dev 블로그 + r/kubernetes·r/node·r/reactjs),
+>   기존 Profile에는 없는 관심사 키만 추가(Kubernetes, Jenkins, CI/CD, Node.js, Langflow, 프론트엔드).
+> - 로컬 실측: Bedrock(sonnet-4-5)으로 jk-01 생성 25초, 2.3k자 1메시지. 단위테스트 93개 통과, `cdk synth` 성공.
+> - ⚠️ **배포 전 주의**: 2026-09-30 현재 AWS에 올라간 코드는 미머지 브랜치 `claude/telegram-daily-posts-reduce-b658e4`
+>   (다이제스트 2~4건) 기준이다. 이 브랜치를 그대로 `cdk deploy`하면 그 변경이 되돌아간다 → 먼저 Prod에 합친 뒤 배포할 것.
+> - 배포 후: `npm run seed` (신규 소스·관심사만 추가) → `aws lambda invoke --function-name <LearnFunctionName> --payload '{"force":true}' --cli-binary-format raw-in-base64-out /dev/stdout` 로 1회 확인.
+
 ---
 
 ## 1. 프로젝트가 뭔가
@@ -179,6 +194,10 @@ aws stepfunctions start-execution \
 ### Phase 2 — 개인화
 - Sources 가중치 학습 루프, Profile 패턴 학습, 탐험/활용 슬롯 실제 반영
 - `deliver/index.ts`의 `isNovel: false` 하드코딩을 실제 신호(candidate 소스/미노출 도메인)로 교체
+
+### 학습 트랙 후속 아이디어
+- 완료/쉽게다시 신호로 트랙별 난이도 자동 조정, 주간 복습 퀴즈
+- 트랙 추가(Docker, GitHub Actions, AWS 네트워킹 등) — `curriculum.ts` 끝에 붙이면 됨
 
 ### Phase 3 — 발견·고도화
 - 신규 사이트 자동 발견(Discovery) + candidate 시범 노출

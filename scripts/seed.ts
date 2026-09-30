@@ -86,6 +86,19 @@ const SEED_SOURCES: Source[] = [
   reddit('aws', 'r/aws', 'cloud'),
   reddit('devops', 'r/devops', 'cloud'),
   reddit('solotravel', 'r/solotravel', 'travel'),
+
+  // ---- 학습 트랙 연계 (2026-09-30, 피드 생존 확인) ----
+  // cloud / backend / frontend / cicd 기본기용. 학습 레슨의 "관련 글"로도 쓰인다.
+  source('kubernetes.io', 'Kubernetes Blog', 'cloud', 'https://kubernetes.io/feed.xml', 0.8),
+  source('cncf.io', 'CNCF Blog', 'cloud', 'https://www.cncf.io/feed/', 0.8),
+  source('jenkins.io', 'Jenkins Blog', 'cloud', 'https://www.jenkins.io/rss.xml', 0.8),
+  source('nodejs.org', 'Node.js Blog', 'dev-ai', 'https://nodejs.org/en/feed/blog.xml', 0.8),
+  source('langflow.org', 'Langflow Blog', 'dev-ai', 'https://www.langflow.org/blog/rss.xml', 0.8),
+  source('react.dev', 'React Blog', 'dev-ai', 'https://react.dev/rss.xml', 0.8),
+  source('web.dev', 'web.dev', 'dev-ai', 'https://web.dev/feed.xml', 0.8),
+  reddit('kubernetes', 'r/kubernetes', 'cloud'),
+  reddit('node', 'r/node', 'dev-ai'),
+  reddit('reactjs', 'r/reactjs', 'dev-ai'),
 ];
 
 const SEED_PROFILE: Profile = {
@@ -100,6 +113,19 @@ const SEED_PROFILE: Profile = {
   },
   explorationRatio: DEFAULTS.EXPLORATION_RATIO,
   updatedAt: new Date().toISOString(),
+};
+
+/**
+ * 기존 Profile에도 넣을 관심사 — 없는 키만 추가한다 (학습된 가중치는 건드리지 않음).
+ * 학습 트랙 주제의 글이 큐레이션 점수에서 밀리지 않게 한다.
+ */
+const INTEREST_ADDITIONS: Record<string, number> = {
+  Kubernetes: 1.0,
+  Jenkins: 1.0,
+  'CI/CD': 1.0,
+  'Node.js': 1.0,
+  Langflow: 1.0,
+  프론트엔드: 1.0,
 };
 
 async function main() {
@@ -118,9 +144,20 @@ async function main() {
 
   const existingProfile = await getProfile(PROFILE_TABLE);
   if (existingProfile) {
-    console.log('· Profile 이미 있음 → 유지 (관심사 학습 결과 보존)');
+    const missing = Object.keys(INTEREST_ADDITIONS).filter((k) => !(k in existingProfile.interests));
+    if (missing.length > 0) {
+      const interests = { ...existingProfile.interests };
+      for (const k of missing) interests[k] = INTEREST_ADDITIONS[k];
+      await putProfile(PROFILE_TABLE, { ...existingProfile, interests, updatedAt: new Date().toISOString() });
+      console.log(`✔ Profile 관심사 추가: ${missing.join(', ')} (기존 가중치 유지)`);
+    } else {
+      console.log('· Profile 이미 있음 → 유지 (관심사 학습 결과 보존)');
+    }
   } else {
-    await putProfile(PROFILE_TABLE, SEED_PROFILE);
+    await putProfile(PROFILE_TABLE, {
+      ...SEED_PROFILE,
+      interests: { ...SEED_PROFILE.interests, ...INTEREST_ADDITIONS },
+    });
     console.log('✔ profile seeded');
   }
 

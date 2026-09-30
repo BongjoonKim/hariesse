@@ -4,8 +4,11 @@ import {
   markArticleFeedbackOnce,
   adjustSourceFeedback,
   bumpProfileInterests,
+  getLearningProgress,
+  putLearningProgress,
 } from '../../lib/dynamo';
 import { decodeCallback, feedbackEffects } from '../../domain/feedback';
+import { decodeLessonCallback, applyLessonFeedback, initialProgress } from '../../domain/learning';
 import { answerCallbackQuery } from '../../lib/telegram';
 import { upsertArticle } from '../../lib/notion';
 
@@ -64,6 +67,19 @@ export const handler = async (event: FunctionUrlEvent): Promise<HttpResponse> =>
       console.warn(`answerCallbackQuery 실패: ${(err as Error).message}`);
     }
   };
+
+  // 학습 레슨 버튼 (l1|...) — 기사 피드백과 저장 위치가 달라 먼저 분기
+  const lessonCb = decodeLessonCallback(cb.data);
+  if (lessonCb) {
+    const cfg = await getConfig();
+    const now = new Date().toISOString();
+    const progress = (await getLearningProgress(cfg.profileTable)) ?? initialProgress(now);
+    const result = applyLessonFeedback(progress, lessonCb.action, lessonCb.lessonId, now);
+    if (result.changed) await putLearningProgress(cfg.profileTable, result.progress);
+    console.log(`lesson feedback: ${lessonCb.action} ${lessonCb.lessonId} changed=${result.changed}`);
+    await answer(result.ack);
+    return OK;
+  }
 
   const decoded = decodeCallback(cb.data);
   if (!decoded) {

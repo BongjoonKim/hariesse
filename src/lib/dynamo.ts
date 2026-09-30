@@ -9,6 +9,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { DEFAULTS } from './constants';
 import { clampWeight, type FeedbackAction } from '../domain/feedback';
+import type { LearningProgress } from '../domain/learning';
 import type { Article, ArticleStatus, Source, Profile } from './types';
 
 const region = process.env.AWS_REGION ?? DEFAULTS.BEDROCK_REGION;
@@ -261,4 +262,15 @@ export async function getProfile(table: string): Promise<Profile | undefined> {
 
 export async function putProfile(table: string, profile: Profile): Promise<void> {
   await doc.send(new PutCommand({ TableName: table, Item: profile }));
+}
+
+// ---- Learning (Profile 테이블의 pk='LEARNING' 아이템) ----
+
+export async function getLearningProgress(table: string): Promise<LearningProgress | undefined> {
+  const res = await doc.send(new GetCommand({ TableName: table, Key: { pk: 'LEARNING' } }));
+  return res.Item as LearningProgress | undefined;
+}
+
+export async function putLearningProgress(table: string, progress: LearningProgress): Promise<void> {
+  await doc.send(new PutCommand({ TableName: table, Item: progress }));
 }
