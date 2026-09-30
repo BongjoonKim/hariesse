@@ -1,6 +1,6 @@
 import { getConfig, getTelegramBotToken, getNotionToken } from '../../lib/config';
 import { listArticlesByStatus, markDelivered } from '../../lib/dynamo';
-import { rankAndSplit, type Rankable } from '../../domain/scoring';
+import { decideDigestSize, rankAndSplit, type Rankable } from '../../domain/scoring';
 import { sendDigest } from '../../lib/telegram';
 import { upsertArticle } from '../../lib/notion';
 import type { Article } from '../../lib/types';
@@ -35,7 +35,13 @@ export const handler = async (): Promise<DeliverResult> => {
     isNovel: false, // 다음 증분: candidate 소스/미노출 도메인을 novel로 표시
   }));
 
-  const ranked = rankAndSplit(rankables, cfg.explorationRatio, cfg.digestSize);
+  const size = decideDigestSize(
+    rankables.map((r) => r.score),
+    cfg.digestMinSize,
+    cfg.digestSize,
+    cfg.digestMinScore
+  );
+  const ranked = rankAndSplit(rankables, cfg.explorationRatio, size);
 
   const selected: Article[] = ranked.map((r) => {
     const a = byId.get(r.item.articleId)!;

@@ -1,4 +1,4 @@
-import { computeSlotCounts, rankAndSplit, type Rankable } from '../src/domain/scoring';
+import { computeSlotCounts, decideDigestSize, rankAndSplit, type Rankable } from '../src/domain/scoring';
 
 describe('computeSlotCounts', () => {
   it('70/30 분배 (size 10, ratio 0.3)', () => {
@@ -76,5 +76,23 @@ describe('rankAndSplit', () => {
 
   it('빈 입력', () => {
     expect(rankAndSplit([], 0.3, 5)).toEqual([]);
+  });
+});
+
+describe('decideDigestSize', () => {
+  it('기준 점수 이상 글 수를 [min, max]로 클램프', () => {
+    expect(decideDigestSize([90, 80, 75, 50], 2, 4, 70)).toBe(3);
+  });
+
+  it('좋은 글이 많아도 max를 넘지 않는다', () => {
+    expect(decideDigestSize([95, 90, 88, 85, 80, 75], 2, 4, 70)).toBe(4);
+  });
+
+  it('좋은 글이 적어도 min은 보낸다', () => {
+    expect(decideDigestSize([60, 40, 30], 2, 4, 70)).toBe(2);
+  });
+
+  it('min > max 설정이면 max 우선', () => {
+    expect(decideDigestSize([90], 5, 3, 70)).toBe(3);
   });
 });

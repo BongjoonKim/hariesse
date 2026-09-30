@@ -64,7 +64,8 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 
 ## 설정값 위치
 - SSM `/hariesse/*`: bedrock-model-id, bedrock-region, exploration-ratio, notion-database-id,
-  telegram-chat-id, daily-bedrock-cap, daily-curate-cap, digest-size.
+  telegram-chat-id, daily-bedrock-cap, daily-curate-cap, digest-size, digest-min-size, digest-min-score.
+- 다이제스트 건수: 점수 ≥ `digest-min-score`(기본 70)인 글 수를 [`digest-min-size`(2), `digest-size`(4)]로 클램프.
 - Secrets `hariesse/telegram-bot-token`, `hariesse/notion-token`.
 - Notion DB ID (생성됨): `a22cbf53637840dc867d6cd8e7b2614e` (My secretary 페이지 하위, DB명 "hariesse Archive").
 

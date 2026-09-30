@@ -136,7 +136,7 @@ aws stepfunctions start-execution \
 | Telegram 봇 | `@haries_work_bot`, chat_id `8657904581` |
 | Secrets Manager | `hariesse/telegram-bot-token`, `hariesse/notion-token` |
 | SSM (설정됨) | `/hariesse/telegram-chat-id`, `/hariesse/notion-database-id` |
-| SSM (미설정, 코드 기본값 사용) | `bedrock-model-id`, `bedrock-region`, `exploration-ratio`, `daily-bedrock-cap`, `daily-curate-cap`, `digest-size` |
+| SSM (미설정, 코드 기본값 사용) | `bedrock-model-id`, `bedrock-region`, `exploration-ratio`, `daily-bedrock-cap`, `daily-curate-cap`, `digest-size`(최대 4), `digest-min-size`(최소 2), `digest-min-score`(70) |
 | 스케줄 | 매일 **07:00 KST** (= 22:00 UTC) |
 
 시드 소스 13개 (`scripts/seed.ts`):

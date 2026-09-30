@@ -18,6 +18,23 @@ export interface Ranked<T> {
 }
 
 /**
+ * 오늘 보낼 다이제스트 건수를 정한다.
+ * 점수 >= minScore 인 글 수를 [minSize, maxSize]로 클램프 — 좋은 글이 많은 날만 더 보낸다.
+ * (탐험 슬롯은 점수 미달 글도 들어갈 수 있으므로 minSize까지는 점수와 무관하게 채운다.)
+ */
+export function decideDigestSize(
+  scores: number[],
+  minSize: number,
+  maxSize: number,
+  minScore: number
+): number {
+  const max = Math.max(0, Math.floor(maxSize));
+  const min = Math.min(max, Math.max(0, Math.floor(minSize)));
+  const qualified = scores.filter((s) => s >= minScore).length;
+  return Math.min(max, Math.max(min, qualified));
+}
+
+/**
  * 다이제스트 슬롯 수를 활용/탐험으로 나눈다.
  * explore = round(size * ratio), exploit = 나머지. 최소 1개씩 보장(size>=2, ratio>0).
  */

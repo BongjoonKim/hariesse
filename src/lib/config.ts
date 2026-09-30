@@ -23,7 +23,10 @@ export interface AppConfig {
   telegramChatId: string;
   dailyBedrockCap: number;
   dailyCurateCap: number;
+  /** 다이제스트 최대 건수 */
   digestSize: number;
+  digestMinSize: number;
+  digestMinScore: number;
 }
 
 let cachedConfig: AppConfig | undefined;
@@ -52,6 +55,8 @@ export async function getConfig(): Promise<AppConfig> {
     SSM.DAILY_BEDROCK_CAP,
     SSM.DAILY_CURATE_CAP,
     SSM.DIGEST_SIZE,
+    SSM.DIGEST_MIN_SIZE,
+    SSM.DIGEST_MIN_SCORE,
   ];
 
   const res = await ssm.send(new GetParametersCommand({ Names: names }));
@@ -73,6 +78,8 @@ export async function getConfig(): Promise<AppConfig> {
     dailyBedrockCap: num(p[SSM.DAILY_BEDROCK_CAP], DEFAULTS.DAILY_BEDROCK_CAP),
     dailyCurateCap: num(p[SSM.DAILY_CURATE_CAP], DEFAULTS.DAILY_CURATE_CAP),
     digestSize: num(p[SSM.DIGEST_SIZE], DEFAULTS.DIGEST_SIZE),
+    digestMinSize: num(p[SSM.DIGEST_MIN_SIZE], DEFAULTS.DIGEST_MIN_SIZE),
+    digestMinScore: num(p[SSM.DIGEST_MIN_SCORE], DEFAULTS.DIGEST_MIN_SCORE),
   };
   return cachedConfig;
 }

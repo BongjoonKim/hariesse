@@ -22,6 +22,8 @@ export const SSM = {
   DAILY_BEDROCK_CAP: '/hariesse/daily-bedrock-cap',
   DAILY_CURATE_CAP: '/hariesse/daily-curate-cap',
   DIGEST_SIZE: '/hariesse/digest-size',
+  DIGEST_MIN_SIZE: '/hariesse/digest-min-size',
+  DIGEST_MIN_SCORE: '/hariesse/digest-min-score',
 } as const;
 
 // Secrets Manager 시크릿 이름 (민감 토큰)
@@ -39,6 +41,9 @@ export const DEFAULTS = {
   EXPLORATION_RATIO: 0.3,
   DAILY_BEDROCK_CAP: 50,
   DAILY_CURATE_CAP: 40,
-  DIGEST_SIZE: 8,
+  // 다이제스트 건수: 점수 >= DIGEST_MIN_SCORE 인 글 수를 [DIGEST_MIN_SIZE, DIGEST_SIZE]로 클램프
+  DIGEST_SIZE: 4,
+  DIGEST_MIN_SIZE: 2,
+  DIGEST_MIN_SCORE: 70,
   ARTICLE_TTL_DAYS: 30,
 } as const;
