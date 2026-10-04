@@ -16,7 +16,8 @@
     "add-source": "ts-node scripts/add-source.ts",
     "synth:design": "cdk synth -c stage=design -c learning=false -c operator=true",
     "deploy:design": "cdk deploy --all -c stage=design -c learning=false -c operator=true",
-    "seed:design": "SEED_SET=design ts-node scripts/seed.ts"
+    "seed:design": "ts-node scripts/seed.ts --set design",
+    "seed:space": "ts-node scripts/seed.ts --set space"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",

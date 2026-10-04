@@ -114,7 +114,12 @@ SOURCES_TABLE=$SOURCES_TABLE PROFILE_TABLE=$PROFILE_TABLE npm run seed:design
 ```
 
 `seed:design`은 UX/UI·그래픽·브랜드 소스 22건(블로그 10, YouTube 8, Reddit 4)과 디자인 Profile을 넣는다.
+**공간 디자이너**라면 대신 `npm run seed:space` — 공간·건축·가구·공간 브랜딩 소스 21건(블로그 11, YouTube 8, Reddit 2)과 공간 Profile.
+둘 중 하나만 고를 것: Profile은 처음 한 번만 들어가서, 나중에 다른 세트를 돌려도 관심사가 바뀌지 않는다.
 재실행해도 기존 소스의 가중치는 덮지 않는다.
+
+> Windows PowerShell 5.1에서 한글 값을 `aws ssm put-parameter --value '...'`로 넣으면 깨져서 저장된다.
+> UTF-8 JSON 파일을 만들고 `$env:AWS_CLI_FILE_ENCODING='UTF-8'; aws ssm put-parameter --cli-input-json file://persona.json`으로 넣을 것.
 
 ### 3-6. 첫 실행으로 검증
 
