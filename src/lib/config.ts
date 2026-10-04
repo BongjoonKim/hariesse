@@ -21,6 +21,8 @@ export interface AppConfig {
   explorationRatio: number;
   notionDatabaseId: string;
   telegramChatId: string;
+  /** 큐레이션 프롬프트용 사용자 소개. 빈 문자열이면 생략. */
+  userPersona: string;
   dailyBedrockCap: number;
   dailyCurateCap: number;
   /** 다이제스트 최대 건수 */
@@ -52,6 +54,7 @@ export async function getConfig(): Promise<AppConfig> {
     SSM.EXPLORATION_RATIO,
     SSM.NOTION_DATABASE_ID,
     SSM.TELEGRAM_CHAT_ID,
+    SSM.USER_PERSONA,
     SSM.DAILY_BEDROCK_CAP,
     SSM.DAILY_CURATE_CAP,
     SSM.DIGEST_SIZE,
@@ -75,6 +78,7 @@ export async function getConfig(): Promise<AppConfig> {
     explorationRatio: num(p[SSM.EXPLORATION_RATIO], DEFAULTS.EXPLORATION_RATIO),
     notionDatabaseId: p[SSM.NOTION_DATABASE_ID] ?? '',
     telegramChatId: p[SSM.TELEGRAM_CHAT_ID] ?? '',
+    userPersona: p[SSM.USER_PERSONA] ?? '',
     dailyBedrockCap: num(p[SSM.DAILY_BEDROCK_CAP], DEFAULTS.DAILY_BEDROCK_CAP),
     dailyCurateCap: num(p[SSM.DAILY_CURATE_CAP], DEFAULTS.DAILY_CURATE_CAP),
     digestSize: num(p[SSM.DIGEST_SIZE], DEFAULTS.DIGEST_SIZE),

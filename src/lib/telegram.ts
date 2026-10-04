@@ -7,6 +7,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   travel: '여행',
   'dev-ai': '개발·AI',
   cloud: '클라우드',
+  design: '디자인',
 };
 
 /** 어디서 온 글인지 한눈에 — YouTube/Reddit이 섞이면서 필요해졌다. */

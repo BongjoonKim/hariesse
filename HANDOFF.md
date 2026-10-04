@@ -47,6 +47,20 @@
 >   `LearnFn`(`HariessePipeline-LearnFn82657FAF-EATxOFghnm26`)을 `{"force":true}`로 실행 → k8s-01 Telegram 1메시지 + 관련 글 2건 + Notion 학습노트 생성 확인.
 >   진도: `turn=1, next.k8s=1, lastSentDate=2026-10-04` → 당일 20:00 정기 실행은 건너뛰고 다음 날 jk-01부터.
 
+> 🆕 **2026-10-04 stage 분리 + 디자인 배포 + 운영 전용 IAM (코드 완료 · 배포 대기).**
+> 목적: 여자친구에게 **디자인 다이제스트**를 Telegram으로. AWS 관리와 배포는 내가, 설정·소스 운영은 여자친구 PC의 Claude Code가(운영 전용 IAM 사용자).
+> - `bin/app.ts` 컨텍스트 `stage`: 없으면 기존 이름 그대로(내 배포, 테이블 재생성 없음), `design`이면 `HariesseDesign*` / `/hariesse-design/*` / `hariesse-design/*`.
+>   `constants.ts`의 `configPrefix()`/`stackPrefix()`가 유일한 이름 규칙. Lambda 환경변수 `HARIESSE_STAGE`.
+> - `-c learning=false`: LearnFn + 20:00 스케줄 생략(디자인 배포는 개발 커리큘럼이 맞지 않아 끔). `-c operator=true`: `OperatorStack`.
+> - `OperatorStack`(`lib/stacks/operator-stack.ts`): IAM 사용자 `hariesse-design-operator` + 관리형 정책. 범위 = 그 stage의 SSM/Secrets 접두어, 함수 5개(호출·설정변경·로그), 상태머신, 테이블 3개 R/W, 스택 Outputs 조회, Bedrock 목록 조회. **배포 권한 없음**(`-c operatorDeploy=true`로 켤 수 있으나 bootstrap 실행 역할이 관리자라 사실상 계정 전체 배포권 → 기본 끔).
+>   액세스 키는 CDK로 만들지 않는다(시크릿이 CFN에 남음). 배포 후 `aws iam create-access-key --user-name hariesse-design-operator`로 직접 발급해 전달.
+> - 카테고리 `design` 추가(telegram/notion 라벨 '디자인', add-source 허용). 큐레이션 프롬프트에 SSM `user-persona` 추가(없으면 생략, 내 배포는 영향 없음).
+> - `scripts/seed.ts` `SEED_SET=design`: 디자인 소스 22건(블로그 10 / YouTube 8 / Reddit 4, 2026-10-04 피드 생존 확인) + 디자인 Profile. `npm run seed:design`.
+> - 운영자용 문서 `docs/OPERATOR.md` — 여자친구 PC의 Claude가 이것만 보고 봇 생성 → Secrets/SSM 입력 → webhook → seed → 수동 실행까지 하도록 썼다. Notion은 선택.
+> - 검증: `tsc`, 단위테스트 97개 통과, `cdk synth` 양쪽 성공. `cdk diff`(내 스택) = Lambda 코드 해시 + Outputs 추가만, IAM/환경변수 변화 없음.
+> - **배포 명령 (내가 실행)**: `npm run deploy:design` → 운영자 액세스 키 발급 → 여자친구 PC로 전달 → `docs/OPERATOR.md` §3.
+>   내 스택도 코드가 바뀌었으니(persona 지원, Outputs) 다음 `npx cdk deploy --all`에서 같이 올라간다. 급하지 않음.
+
 ---
 
 ## 1. 프로젝트가 뭔가

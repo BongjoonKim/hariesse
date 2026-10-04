@@ -13,7 +13,10 @@
     "synth": "cdk synth",
     "deploy": "cdk deploy --all",
     "seed": "ts-node scripts/seed.ts",
-    "add-source": "ts-node scripts/add-source.ts"
+    "add-source": "ts-node scripts/add-source.ts",
+    "synth:design": "cdk synth -c stage=design -c learning=false -c operator=true",
+    "deploy:design": "cdk deploy --all -c stage=design -c learning=false -c operator=true",
+    "seed:design": "SEED_SET=design ts-node scripts/seed.ts"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.145",

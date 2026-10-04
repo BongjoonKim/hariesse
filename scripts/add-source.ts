@@ -19,7 +19,7 @@ import type { Category, Source, SourceType } from '../src/lib/types';
 const SOURCES_TABLE = process.env.SOURCES_TABLE;
 const UA = 'HariesseBot/0.1 (+personal curation agent)';
 const TYPES: SourceType[] = ['blog', 'youtube', 'reddit'];
-const CATEGORIES: Category[] = ['travel', 'dev-ai', 'cloud'];
+const CATEGORIES: Category[] = ['travel', 'dev-ai', 'cloud', 'design'];
 
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};

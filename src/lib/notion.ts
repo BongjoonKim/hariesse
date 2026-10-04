@@ -9,6 +9,7 @@ const CATEGORY_LABEL: Record<Category, string> = {
   travel: '여행',
   'dev-ai': '개발·AI',
   cloud: '클라우드',
+  design: '디자인',
 };
 const SOURCE_LABEL: Record<SourceType, string> = {
   blog: '블로그',

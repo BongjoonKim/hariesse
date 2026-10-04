@@ -8,7 +8,20 @@
 > **요약: 2026-07-20 배포 + E2E 검증 완료. Feedback 증분(Telegram 버튼 + ApiStack)도 배포·검증 완료.**
 > **2026-09-06 소스 확장 증분: YouTube + Reddit 수집 어댑터 추가 (코드 완료, 재배포 필요).**
 > **2026-09-30 학습 트랙 증분: 매일 20:00 KST 기술 레슨 1건(Telegram + Notion 학습노트) — 2026-10-04 배포·E2E 검증 완료.**
+> **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자. 코드 완료, 배포 대기 — HANDOFF 맨 위 참고.**
 > **다음 증분은 Phase 2 개인화(가중치 학습 슬롯 반영, isNovel 실제 신호) — HANDOFF §7 로드맵 참고.**
+
+> 🧑‍🎨 **운영자 세션(다른 PC, IAM 사용자 `hariesse-design-operator`)이라면 [docs/OPERATOR.md](./docs/OPERATOR.md)만 보면 된다.**
+> 그 자격증명으로는 `stage=design` 리소스 운영만 가능하고 배포·다른 stage 접근은 안 된다.
+
+## stage (같은 계정에 여러 벌)
+- stage 없음 = 내 배포: 스택 `Hariesse*`, SSM `/hariesse/*`, Secrets `hariesse/*`. **기존 이름 그대로, 바꾸지 말 것(테이블 재생성됨).**
+- `stage=design` = 디자인 배포: 스택 `HariesseDesign*`, SSM `/hariesse-design/*`, Secrets `hariesse-design/*`.
+  Lambda에는 환경변수 `HARIESSE_STAGE`로 전달되고, 런타임은 `constants.ts`의 `configPrefix()`로 같은 규칙을 쓴다.
+- 한 번의 synth/deploy는 한 stage만 다룬다. `npm run deploy:design` = `-c stage=design -c learning=false -c operator=true`.
+  `operator=true`는 `OperatorStack`(운영 전용 IAM 사용자 + 접두어 범위 정책)을 만든다. `-c operatorDeploy=true`를 주면 CDK 배포 권한까지 붙지만 기본은 끔.
+- 시드도 세트로 나뉜다: `npm run seed`(내 것) / `npm run seed:design`(디자인). **테이블 이름이 어느 stage 것인지 확인하고 실행.**
+- 카테고리 `design` 추가됨. 큐레이션 프롬프트에 SSM `user-persona`(사용자 소개)가 들어간다(없으면 생략).
 
 ## 현재 상태: Phase 1 + Feedback + 소스 확장
 `Collection → Curation → Delivery → Feedback` 루프가 끝까지 동작.

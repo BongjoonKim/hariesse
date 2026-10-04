@@ -42,6 +42,7 @@ export const handler = async (): Promise<CurateResult> => {
         sourceType: article.source,
         bodyText,
         interests,
+        persona: cfg.userPersona,
       });
       await saveCuration(cfg.articlesTable, article.articleId, {
         score: result.score,

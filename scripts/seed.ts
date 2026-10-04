@@ -6,6 +6,10 @@
  *   SOURCES_TABLE=<name> PROFILE_TABLE=<name> \
  *   npm run seed
  *
+ * 시드 세트: 환경변수 SEED_SET (기본 `default` = 내 것: 여행/개발·AI/클라우드).
+ *   SEED_SET=design → 디자인 배포(stage=design)용 UX/UI·그래픽·브랜드 소스 + 디자인 Profile.
+ *   세트를 잘못 고르면 다른 사람 테이블에 엉뚱한 소스가 들어가니, SOURCES_TABLE이 어느 stage 것인지 확인할 것.
+ *
  * 테이블 이름은 `cdk deploy`의 CfnOutput(SourcesTableName/ProfileTableName)에서 확인.
  *
  * 재실행 안전: 소스는 `putSourceIfNew`라 이미 있으면 건드리지 않는다
@@ -19,6 +23,7 @@ import type { Source, Profile, SourceType } from '../src/lib/types';
 
 const SOURCES_TABLE = process.env.SOURCES_TABLE;
 const PROFILE_TABLE = process.env.PROFILE_TABLE;
+const SEED_SET = (process.env.SEED_SET ?? 'default').trim();
 
 function source(
   domain: string,
@@ -67,7 +72,7 @@ function reddit(
   return source(`reddit.com/r/${sub}`, name, category, `r/${sub}`, weight, 'reddit');
 }
 
-const SEED_SOURCES: Source[] = [
+const DEFAULT_SOURCES: Source[] = [
   // ---- 블로그(RSS) ----
   source('aws.amazon.com', 'AWS Architecture Blog', 'cloud', 'https://aws.amazon.com/blogs/architecture/feed/', 1.0),
   source('techblog.woowahan.com', '우아한형제들 기술블로그', 'dev-ai', 'https://techblog.woowahan.com/feed/', 1.0),
@@ -101,7 +106,7 @@ const SEED_SOURCES: Source[] = [
   reddit('reactjs', 'r/reactjs', 'dev-ai'),
 ];
 
-const SEED_PROFILE: Profile = {
+const DEFAULT_PROFILE: Profile = {
   pk: 'PROFILE',
   interests: {
     PQC: 1.0,
@@ -119,7 +124,7 @@ const SEED_PROFILE: Profile = {
  * 기존 Profile에도 넣을 관심사 — 없는 키만 추가한다 (학습된 가중치는 건드리지 않음).
  * 학습 트랙 주제의 글이 큐레이션 점수에서 밀리지 않게 한다.
  */
-const INTEREST_ADDITIONS: Record<string, number> = {
+const DEFAULT_INTEREST_ADDITIONS: Record<string, number> = {
   Kubernetes: 1.0,
   Jenkins: 1.0,
   'CI/CD': 1.0,
@@ -128,10 +133,73 @@ const INTEREST_ADDITIONS: Record<string, number> = {
   프론트엔드: 1.0,
 };
 
+// ======================================================================
+// 디자인 세트 (stage=design) — 피드 생존은 2026-10-04 확인. 카테고리는 전부 'design'.
+// 소스를 더 넣으려면 여기 추가하거나 `npm run add-source -- --category design ...`.
+// ======================================================================
+const DESIGN_SOURCES: Source[] = [
+  // ---- 블로그(RSS) ----
+  source('smashingmagazine.com', 'Smashing Magazine', 'design', 'https://www.smashingmagazine.com/feed/', 1.0),
+  source('nngroup.com', 'Nielsen Norman Group', 'design', 'https://www.nngroup.com/feed/rss/', 1.0),
+  source('uxdesign.cc', 'UX Collective', 'design', 'https://uxdesign.cc/feed', 1.0),
+  source('alistapart.com', 'A List Apart', 'design', 'https://alistapart.com/main/feed/', 0.8),
+  source('medium.com/google-design', 'Google Design', 'design', 'https://medium.com/feed/google-design', 0.8),
+  source('creativebloq.com', 'Creative Bloq', 'design', 'https://www.creativebloq.com/feed', 0.8),
+  source('designweek.co.uk', 'Design Week', 'design', 'https://www.designweek.co.uk/feed/', 0.8),
+  source('designboom.com', 'designboom', 'design', 'https://www.designboom.com/feed/', 0.8),
+  source('brand.design', 'Brand.Design', 'design', 'https://brand.design/feed', 0.8),
+  source('story.pxd.co.kr', 'pxd story (한국어 UX)', 'design', 'https://story.pxd.co.kr/rss', 1.0),
+
+  // ---- YouTube (채널 ID는 2026-10-04 확인) ----
+  youtube('UCQsVmhSa4X-G3lHlUtejzLA', 'Figma', 'design', 1.0), // @figma
+  youtube('UC-b3c7kxa5vU-bnmaROgvog', 'The Futur', 'design'), // @TheFutur
+  youtube('UCN7dywl5wDxTu1RM3eJ_h9Q', 'Flux Academy', 'design'), // @FluxAcademy
+  youtube('UCVyRiMvfUNMA1UPlDPzG5Ow', 'DesignCourse', 'design'), // @DesignCourse
+  youtube('UCZJkZy008cQjqkJeKpJu8tA', 'Mizko', 'design'), // @mizko
+  youtube('UCvBGFeXbBrq3W9_0oNLJREQ', 'Jesse Showalter', 'design'), // @JesseShowalter
+  youtube('UCeyR48P2g1N8Ln6m1VjBd3g', 'Dribbble', 'design'), // @Dribbble
+  youtube('UCvYnDMeL-PFZhfIz6oc_U-Q', '디자인베이스', 'design', 1.0), // @designbase
+
+  // ---- Reddit ----
+  reddit('UI_Design', 'r/UI_Design', 'design'),
+  reddit('userexperience', 'r/userexperience', 'design'),
+  reddit('web_design', 'r/web_design', 'design'),
+  reddit('graphic_design', 'r/graphic_design', 'design'),
+];
+
+const DESIGN_PROFILE: Profile = {
+  pk: 'PROFILE',
+  interests: {
+    'UX/UI': 1.0,
+    Figma: 1.0,
+    타이포그래피: 1.0,
+    브랜딩: 1.0,
+    '디자인 시스템': 1.0,
+    포트폴리오: 0.8,
+  },
+  explorationRatio: DEFAULTS.EXPLORATION_RATIO,
+  updatedAt: new Date().toISOString(),
+};
+
+interface SeedSet {
+  sources: Source[];
+  profile: Profile;
+  interestAdditions: Record<string, number>;
+}
+
+const SEED_SETS: Record<string, SeedSet> = {
+  default: { sources: DEFAULT_SOURCES, profile: DEFAULT_PROFILE, interestAdditions: DEFAULT_INTEREST_ADDITIONS },
+  design: { sources: DESIGN_SOURCES, profile: DESIGN_PROFILE, interestAdditions: {} },
+};
+
 async function main() {
   if (!SOURCES_TABLE || !PROFILE_TABLE) {
     throw new Error('환경변수 SOURCES_TABLE, PROFILE_TABLE 필요');
   }
+  const set = SEED_SETS[SEED_SET];
+  if (!set) throw new Error(`SEED_SET은 ${Object.keys(SEED_SETS).join(' | ')} 중 하나 (받음: ${SEED_SET})`);
+  const { sources: SEED_SOURCES, profile: SEED_PROFILE, interestAdditions: INTEREST_ADDITIONS } = set;
+  console.log(`시드 세트: ${SEED_SET} (소스 ${SEED_SOURCES.length}건) → ${SOURCES_TABLE}`);
 
   let added = 0;
   for (const s of SEED_SOURCES) {

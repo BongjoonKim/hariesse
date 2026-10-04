@@ -1,6 +1,12 @@
 /**
  * CDK와 런타임이 공유하는 상수: 환경변수 키, SSM/Secrets 경로.
  * 값(토큰 등)은 여기 두지 않는다 — 이름만.
+ *
+ * stage: 같은 AWS 계정에 hariesse를 여러 벌 올리기 위한 접두어.
+ *   - stage 없음(기본, 내 것): 스택 `Hariesse*`, SSM `/hariesse/*`, Secrets `hariesse/*`
+ *   - stage=design:            스택 `HariesseDesign*`, SSM `/hariesse-design/*`, Secrets `hariesse-design/*`
+ * CDK는 `configPrefix(stage)`로 이름을 만들고, Lambda에는 ENV.STAGE로 넘긴다.
+ * 런타임은 ENV.STAGE를 읽어 같은 규칙으로 SSM/SECRETS 경로를 만든다.
  */
 
 // Lambda 환경변수 키 (CDK가 주입, 런타임이 읽음)
@@ -9,29 +15,56 @@ export const ENV = {
   ARTICLES_TABLE: 'ARTICLES_TABLE',
   PROFILE_TABLE: 'PROFILE_TABLE',
   RAW_BUCKET: 'RAW_BUCKET',
+  /** 배포 stage (없으면 기본 배포). SSM/Secrets 접두어를 정한다. */
+  STAGE: 'HARIESSE_STAGE',
 } as const;
 
-// SSM Parameter Store 경로 (비-시크릿 설정값)
-export const SSM = {
-  BEDROCK_MODEL_ID: '/hariesse/bedrock-model-id',
-  BEDROCK_REGION: '/hariesse/bedrock-region',
-  EXPLORATION_RATIO: '/hariesse/exploration-ratio',
-  NOTION_DATABASE_ID: '/hariesse/notion-database-id',
-  TELEGRAM_CHAT_ID: '/hariesse/telegram-chat-id',
-  // 가드레일
-  DAILY_BEDROCK_CAP: '/hariesse/daily-bedrock-cap',
-  DAILY_CURATE_CAP: '/hariesse/daily-curate-cap',
-  DIGEST_SIZE: '/hariesse/digest-size',
-  DIGEST_MIN_SIZE: '/hariesse/digest-min-size',
-  DIGEST_MIN_SCORE: '/hariesse/digest-min-score',
-} as const;
+/** stage → SSM/Secrets 접두어. stage가 없거나 빈 문자열이면 기존 이름 그대로. */
+export function configPrefix(stage?: string): { ssm: string; secrets: string } {
+  const s = (stage ?? '').trim();
+  const base = s ? `hariesse-${s}` : 'hariesse';
+  return { ssm: `/${base}`, secrets: base };
+}
 
-// Secrets Manager 시크릿 이름 (민감 토큰)
-export const SECRETS = {
-  TELEGRAM_BOT_TOKEN: 'hariesse/telegram-bot-token',
-  NOTION_TOKEN: 'hariesse/notion-token',
-  TELEGRAM_WEBHOOK_SECRET: 'hariesse/telegram-webhook-secret',
-} as const;
+/** stage → 스택 이름 접두어 (`Hariesse` / `HariesseDesign`). */
+export function stackPrefix(stage?: string): string {
+  const s = (stage ?? '').trim();
+  if (!s) return 'Hariesse';
+  return `Hariesse${s[0].toUpperCase()}${s.slice(1)}`;
+}
+
+/** SSM Parameter Store 경로 (비-시크릿 설정값) */
+export function ssmPaths(prefix: string) {
+  return {
+    BEDROCK_MODEL_ID: `${prefix}/bedrock-model-id`,
+    BEDROCK_REGION: `${prefix}/bedrock-region`,
+    EXPLORATION_RATIO: `${prefix}/exploration-ratio`,
+    NOTION_DATABASE_ID: `${prefix}/notion-database-id`,
+    TELEGRAM_CHAT_ID: `${prefix}/telegram-chat-id`,
+    /** 큐레이션 프롬프트에 넣을 사용자 소개(한두 문장). 없으면 생략. */
+    USER_PERSONA: `${prefix}/user-persona`,
+    // 가드레일
+    DAILY_BEDROCK_CAP: `${prefix}/daily-bedrock-cap`,
+    DAILY_CURATE_CAP: `${prefix}/daily-curate-cap`,
+    DIGEST_SIZE: `${prefix}/digest-size`,
+    DIGEST_MIN_SIZE: `${prefix}/digest-min-size`,
+    DIGEST_MIN_SCORE: `${prefix}/digest-min-score`,
+  } as const;
+}
+
+/** Secrets Manager 시크릿 이름 (민감 토큰) */
+export function secretNames(prefix: string) {
+  return {
+    TELEGRAM_BOT_TOKEN: `${prefix}/telegram-bot-token`,
+    NOTION_TOKEN: `${prefix}/notion-token`,
+    TELEGRAM_WEBHOOK_SECRET: `${prefix}/telegram-webhook-secret`,
+  } as const;
+}
+
+// 런타임용: Lambda 환경변수의 stage로 결정된 경로. (CDK 합성 시에는 stage 미설정 → 기본 경로지만, CDK는 이 객체를 쓰지 않는다.)
+const runtimePrefix = configPrefix(process.env[ENV.STAGE]);
+export const SSM = ssmPaths(runtimePrefix.ssm);
+export const SECRETS = secretNames(runtimePrefix.secrets);
 
 // 기본값 (SSM 미설정 시 폴백)
 export const DEFAULTS = {
