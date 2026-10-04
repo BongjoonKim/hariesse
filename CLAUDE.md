@@ -68,7 +68,7 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - **소스 추가는 파괴적이지 않게**: seed/add-source는 `putSourceIfNew`(조건부 put)만 쓴다.
   덮어쓰면 피드백으로 쌓인 `weight`/`likeCount`가 날아간다.
 - **Reddit 레이트리밋**: 익명 요청은 금방 429가 나고 한동안 안 풀린다.
-  `collectors.ts`의 호출 간격(4초) + 백오프 재시도를 줄이지 말 것.
+  `collectors.ts`의 `REDDIT_POLICY`(간격 20초, 백오프 30s·60s + `x-ratelimit-reset` 헤더 존중)를 줄이지 말 것.
 - **학습 레슨 id는 바꾸지 말 것**: 진도·완료 기록이 레슨 id(`k8s-01` 등)로 저장되고 버튼 callback_data에도 들어간다.
   레슨 추가는 트랙 끝에. 참고 링크는 LLM이 만들지 않고 `curriculum.ts`의 공식 문서만 쓴다(지어낸 URL 방지).
 - **학습 진도 저장 위치**: Profile 테이블의 `pk='LEARNING'` 아이템. 같은 KST 날짜엔 1번만 발송(`lastSentDate`).

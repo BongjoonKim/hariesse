@@ -49,7 +49,7 @@
 
 > 🔎 **2026-10-04 운영 점검 (AWS 실측).** 상세는 §3-1.
 > - 스택 3개(`HariesseData`/`HariessePipeline`/`HariesseApi`) 정상, 스케줄 2개(07:00·20:00 KST) ENABLED.
-> - 소스 23개 전부 active. collect는 매일 11~14건 신규 수집 중이지만 **항상 2개 실패** (우아한형제들 403, r/MachineLearning 429).
+> - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
 ---
@@ -121,12 +121,16 @@
 | 항목 | 상태 |
 |---|---|
 | CollectFn | 최종 갱신 2026-09-30. 9/30~10/3 매일 `collect 완료: 11~14건 신규 (73~91 스캔, 13 소스, 실패 2)` |
-| 지속 실패 소스 | 우아한형제들 `techblog.woowahan.com/feed/` → **403** (매일). r/MachineLearning → **429** (9/30 이후 매일, 마지막 성공 9/29) |
+| 지속 실패 소스 | 우아한형제들 `techblog.woowahan.com/feed/` → **403** (매일) → muted. r/MachineLearning → **429** (9/30 이후 매일, 마지막 성공 9/29) → 재시도 정책 수정 |
 | 미수집 소스 10건 | kubernetes.io, nodejs.org, react.dev, web.dev, cncf.io, jenkins.io, langflow.org, r/kubernetes, r/node, r/reactjs — 10/4 seed, 10/5 첫 수집 예정 |
 | LearnFn | 10/4 force 실행 성공 (k8s-01). 트랙 라운드로빈이라 10/5 20:00은 **jk-01** |
 | 소스 가중치 | 피드백 반영 중 — 토스 1.45, YouTube 일부 1.1~1.15, r/LocalLLaMA·r/programming 0.5 |
 
-> 실패 소스 2건은 다음에 처리: 우아한형제들은 UA/대체 피드 확인 또는 `status` 비활성화, r/MachineLearning은 호출 순서·간격 조정 검토.
+> **실패 소스 처리 (2026-10-04)**
+> - 우아한형제들: 로컬(봇 UA 포함)에선 200, Lambda에선 매일 403 → Cloudflare가 AWS IP를 막는 것으로 판단.
+>   우회(프록시 등)는 하지 않고 `status=muted`로 비활성화 (`mutedReason`/`mutedAt` 기록, weight 보존). 다시 켜려면 `status=active`.
+> - Reddit 429: r/MachineLearning 고유 문제가 아니었다 (9/26~29엔 r/aws가 같은 식으로 실패). 익명 RSS는 요청 1번에
+>   `x-ratelimit-remaining: 0`, `x-ratelimit-reset: ~50초`라 30초 백오프 1회로는 부족 → 백오프 `[30s, 60s]` + 서버 대기 헤더 존중(상한 90초).
 > 상태 확인은 `aws logs filter-log-events --log-group-name /aws/lambda/<CollectFn> --filter-pattern '"collect 완료"'`.
 
 ---
@@ -235,7 +239,7 @@ aws stepfunctions start-execution \
   `global.anthropic.claude-haiku-4-5-20251001-v1:0`, 품질 우선이면 `global.anthropic.claude-sonnet-4-5-20250929-v1:0`로 SSM 덮어쓰기.
 - **macOS 셸** → `head -n -1` 같은 GNU 전용 옵션 안 먹는다.
 - **Reddit 레이트리밋** → 익명 요청은 금방 429가 나고 한 번 걸리면 수십 초 안 풀린다.
-  `collectors.ts`의 `REDDIT_POLICY`(호출 간격 20초 + 30초 백오프 1회)를 줄이지 말 것.
+  `collectors.ts`의 `REDDIT_POLICY`(호출 간격 20초 + 백오프 30s·60s, `x-ratelimit-reset` 헤더 존중)를 줄이지 말 것.
   그래도 일부 서브레딧이 실패할 수 있는데, collect는 실패 소스를 건너뛰고 계속 간다
   (`failedSources` 카운트로 로그에 남음). `.json` 엔드포인트는 UA를 붙여도 403이라 안 쓴다.
 - **YouTube 채널 ID** → `@handle`은 바뀔 수 있어 채널 ID(`UC...`)로 저장한다.

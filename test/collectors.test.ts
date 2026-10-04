@@ -9,6 +9,8 @@ import {
   toBlogItem,
   resolveFeedUrl,
   policyFor,
+  parseRetryAfterSec,
+  retryDelayMs,
   sourceType,
   stripHtml,
 } from '../src/lib/collectors';
@@ -237,6 +239,37 @@ describe('policyFor', () => {
     expect(policyFor('https://toss.tech/rss.xml').minIntervalMs).toBe(0);
     // reddit이 도메인 일부로 들어간 남의 호스트에 정책이 새면 안 된다
     expect(policyFor('https://reddit.com.evil.example/feed').minIntervalMs).toBe(0);
+  });
+});
+
+describe('parseRetryAfterSec', () => {
+  const headers = (h: Record<string, string>) => ({ get: (n: string) => h[n] ?? null });
+
+  it('Retry-After를 우선하고, 없으면 Reddit x-ratelimit-reset', () => {
+    expect(parseRetryAfterSec(headers({ 'retry-after': '12', 'x-ratelimit-reset': '49' }))).toBe(12);
+    expect(parseRetryAfterSec(headers({ 'x-ratelimit-reset': '49' }))).toBe(49);
+  });
+
+  it('없거나 숫자가 아니면 undefined (HTTP-date 형식 포함)', () => {
+    expect(parseRetryAfterSec(headers({}))).toBeUndefined();
+    expect(parseRetryAfterSec(headers({ 'retry-after': 'Wed, 21 Oct 2026 07:28:00 GMT' }))).toBeUndefined();
+  });
+});
+
+describe('retryDelayMs', () => {
+  const reddit = policyFor('https://www.reddit.com/r/aws/top/.rss?t=day');
+
+  it('서버 요구가 백오프보다 길면 서버 요구(+1초)를 따른다', () => {
+    expect(retryDelayMs(reddit, 0, 49)).toBe(50000);
+  });
+
+  it('서버 요구가 짧거나 없으면 정책 백오프', () => {
+    expect(retryDelayMs(reddit, 0, 5)).toBe(reddit.backoffMs[0]);
+    expect(retryDelayMs(reddit, 0)).toBe(reddit.backoffMs[0]);
+  });
+
+  it('서버가 아주 길게 요구해도 상한에서 자른다', () => {
+    expect(retryDelayMs(reddit, 0, 3600)).toBe(90000);
   });
 });
 

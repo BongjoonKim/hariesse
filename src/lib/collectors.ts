@@ -239,8 +239,10 @@ export interface FetchPolicy {
 /**
  * Reddit는 익명 요청을 아주 빡빡하게 조인다. 실측(2026-09-06) 결과 4초 간격으로는
  * 절반이 429였고, 한 번 걸리면 수십 초간 안 풀린다. 하루 1회 실행이라 넉넉히 벌려도 손해가 없다.
+ * 실측(2026-10-04): 익명 RSS는 요청 1번에 `x-ratelimit-remaining: 0`, `x-ratelimit-reset: ~50`초.
+ * 30초 백오프 1회로는 창이 안 풀려서 매일 Reddit 소스 1개가 429로 빠졌다 → 2회 + 헤더 대기 존중.
  */
-const REDDIT_POLICY: FetchPolicy = { minIntervalMs: 20000, backoffMs: [30000] };
+const REDDIT_POLICY: FetchPolicy = { minIntervalMs: 20000, backoffMs: [30000, 60000] };
 const DEFAULT_POLICY: FetchPolicy = { minIntervalMs: 0, backoffMs: [2000, 5000] };
 
 /** URL → 호출 정책. 호스트를 정확히 보고 고른다(부분 문자열 매칭 금지). 순수함수. */
@@ -252,6 +254,28 @@ export function policyFor(url: string): FetchPolicy {
     return DEFAULT_POLICY;
   }
   return host === 'reddit.com' || host.endsWith('.reddit.com') ? REDDIT_POLICY : DEFAULT_POLICY;
+}
+
+/** 서버가 알려준 대기 시간도 이 이상은 기다리지 않는다 (Lambda 시간 보호). */
+const MAX_RETRY_WAIT_MS = 90000;
+
+/**
+ * 429/5xx 응답 헤더에서 서버가 요구하는 대기 시간(초)을 읽는다. 순수함수.
+ * 표준 `Retry-After`(초) 우선, 없으면 Reddit의 `x-ratelimit-reset`(창이 풀리기까지 남은 초).
+ */
+export function parseRetryAfterSec(headers: { get(name: string): string | null }): number | undefined {
+  for (const name of ['retry-after', 'x-ratelimit-reset']) {
+    const value = Number(headers.get(name));
+    if (headers.get(name) !== null && Number.isFinite(value) && value >= 0) return value;
+  }
+  return undefined;
+}
+
+/** 재시도 전 대기 시간. 정책 백오프와 서버 요구(+1초 여유) 중 긴 쪽, 상한 적용. 순수함수. */
+export function retryDelayMs(policy: FetchPolicy, attempt: number, retryAfterSec?: number): number {
+  const base = policy.backoffMs[attempt] ?? 0;
+  if (retryAfterSec === undefined) return base;
+  return Math.max(base, Math.min(retryAfterSec * 1000 + 1000, MAX_RETRY_WAIT_MS));
 }
 
 const lastFetchAt = new Map<FetchPolicy, number>();
@@ -272,7 +296,7 @@ async function throttle(policy: FetchPolicy): Promise<void> {
 async function fetchOnce(
   url: string,
   timeoutMs: number
-): Promise<{ ok: boolean; status: number; text: string }> {
+): Promise<{ ok: boolean; status: number; text: string; retryAfterSec?: number }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -283,7 +307,9 @@ async function fetchOnce(
         Accept: 'application/rss+xml, application/atom+xml, application/xml;q=0.9, */*;q=0.8',
       },
     });
-    if (!res.ok) return { ok: false, status: res.status, text: '' };
+    if (!res.ok) {
+      return { ok: false, status: res.status, text: '', retryAfterSec: parseRetryAfterSec(res.headers) };
+    }
     return { ok: true, status: res.status, text: await res.text() };
   } finally {
     clearTimeout(timer);
@@ -298,7 +324,7 @@ async function fetchFeedText(url: string, timeoutMs = 12000): Promise<string> {
     const res = await fetchOnce(url, timeoutMs);
     if (res.ok) return res.text;
     if (RETRYABLE_STATUS.has(res.status) && attempt < policy.backoffMs.length) {
-      await sleep(policy.backoffMs[attempt]);
+      await sleep(retryDelayMs(policy, attempt, res.retryAfterSec));
       continue;
     }
     throw new Error(`feed fetch ${url} -> ${res.status}`);
