@@ -31,6 +31,9 @@ export interface AppConfig {
   digestMinScore: number;
 }
 
+/** SSM GetParameters 1회 호출당 이름 개수 상한 (AWS API 제약). */
+const SSM_GET_PARAMETERS_MAX = 10;
+
 let cachedConfig: AppConfig | undefined;
 const secretCache = new Map<string, string>();
 
@@ -62,10 +65,13 @@ export async function getConfig(): Promise<AppConfig> {
     SSM.DIGEST_MIN_SCORE,
   ];
 
-  const res = await ssm.send(new GetParametersCommand({ Names: names }));
+  // GetParameters는 한 번에 최대 10개 — 넘으면 ValidationException. 10개씩 나눠 조회한다.
   const p: Record<string, string> = {};
-  for (const param of res.Parameters ?? []) {
-    if (param.Name && param.Value !== undefined) p[param.Name] = param.Value;
+  for (let i = 0; i < names.length; i += SSM_GET_PARAMETERS_MAX) {
+    const res = await ssm.send(new GetParametersCommand({ Names: names.slice(i, i + SSM_GET_PARAMETERS_MAX) }));
+    for (const param of res.Parameters ?? []) {
+      if (param.Name && param.Value !== undefined) p[param.Name] = param.Value;
+    }
   }
 
   cachedConfig = {
