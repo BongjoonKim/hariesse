@@ -20,7 +20,7 @@
 >   (401 인증, like 반영, 중복 무시, Notion 상태=별표 전파 확인).
 > - **다음 할 일은 Phase 2 개인화** — Sources 가중치를 스코어링에 실제 반영, `isNovel` 하드코딩 교체.
 
-> 🆕 **2026-09-06 소스 확장 증분 (코드 완료 · 배포 대기).**
+> ✅ **2026-09-06 소스 확장 증분 — 배포 완료 (2026-10-04 확인).**
 > `Source.type`으로 **blog / youtube / reddit** 수집을 분기한다 (`src/lib/collectors.ts`).
 > - YouTube: 채널 RSS(`feeds/videos.xml?channel_id=UC...`), 본문 = 영상 설명. 페이지 추출은 안 한다(Readability로 안 나옴).
 > - Reddit: 서브레딧 RSS(`r/<sub>/top/.rss?t=day`). 링크글은 **외부 원문**을 저장·추출하고
@@ -30,7 +30,7 @@
 >   저장 전 피드 생존 확인, `--dry-run` 지원.
 > - seed/add-source 모두 `putSourceIfNew` — **재실행해도 기존 소스의 weight를 덮지 않는다.**
 > - 실측 검증(로컬): Fireship 15건 / r/programming·r/LocalLLaMA·r/aws·r/solotravel 정상 파싱 / 토스 20건.
-> - **배포 필요**: `npx cdk deploy --all` 후 `npm run seed`(신규 소스 10건만 추가됨).
+> - 배포일은 기록 없음 — 늦어도 9/29부터 Reddit 수집 기록이 있고 `CollectFn` 최종 갱신은 9/30. YouTube 4채널·Reddit 6개 매일 수집 중 (§3-1).
 
 > ✅ **2026-09-30 학습 트랙 증분 — 2026-10-04 배포·E2E 검증 완료.**
 > 목적: AI를 잘 쓰기 위한 기본기(cloud / backend / frontend / cicd)를 매일 조금씩. 다이제스트와 별개 메시지.
@@ -46,6 +46,11 @@
 > - 2026-10-04 배포: `dface73`(다이제스트 2~4건) 위에 rebase 후 Prod ff-merge → `cdk deploy --all` → seed(신규 소스 10건 + 관심사 6개).
 >   `LearnFn`(`HariessePipeline-LearnFn82657FAF-EATxOFghnm26`)을 `{"force":true}`로 실행 → k8s-01 Telegram 1메시지 + 관련 글 2건 + Notion 학습노트 생성 확인.
 >   진도: `turn=1, next.k8s=1, lastSentDate=2026-10-04` → 당일 20:00 정기 실행은 건너뛰고 다음 날 jk-01부터.
+
+> 🔎 **2026-10-04 운영 점검 (AWS 실측).** 상세는 §3-1.
+> - 스택 3개(`HariesseData`/`HariessePipeline`/`HariesseApi`) 정상, 스케줄 2개(07:00·20:00 KST) ENABLED.
+> - 소스 23개 전부 active. collect는 매일 11~14건 신규 수집 중이지만 **항상 2개 실패** (우아한형제들 403, r/MachineLearning 429).
+> - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
 ---
 
@@ -72,10 +77,11 @@
 | 리전 | **ap-northeast-2 (서울)** | 전 리소스 동일 리전 |
 | Bedrock 모델 | 기본 `apac.anthropic.claude-sonnet-4-20250514-v1:0` | 서울 ACTIVE 확인됨. SSM으로 교체 가능 |
 | 빌드 방식 | **워킹 스켈레톤 먼저** | 스펙의 "단계적 빌드" 원칙. 한 줄기를 끝까지 동작시킨 뒤 확장 |
+| 관리자 웹 | **보류** (2026-10-04) — 운영은 Claude Code 세션에서 AWS CLI로 | 1인용이라 웹은 인증·유지보수 부담 대비 효용이 낮음. Phase 2에서 가중치 등 시각화할 데이터가 생기면 읽기 전용 대시보드 재검토 |
 
 ---
 
-## 3. 현재 상태 — ✅ 코드 완성 + 검증 끝, ❌ 미배포
+## 3. 최초 배포 전 상태 (2026-07-20 기록 — 이후 배포 완료, 맨 위 상태 블록 참고)
 
 ### 완료된 것
 
@@ -110,7 +116,22 @@
 
 ---
 
-## 4. 다음 세션에서 할 일 (그대로 실행)
+## 3-1. 운영 점검 (2026-10-04)
+
+| 항목 | 상태 |
+|---|---|
+| CollectFn | 최종 갱신 2026-09-30. 9/30~10/3 매일 `collect 완료: 11~14건 신규 (73~91 스캔, 13 소스, 실패 2)` |
+| 지속 실패 소스 | 우아한형제들 `techblog.woowahan.com/feed/` → **403** (매일). r/MachineLearning → **429** (9/30 이후 매일, 마지막 성공 9/29) |
+| 미수집 소스 10건 | kubernetes.io, nodejs.org, react.dev, web.dev, cncf.io, jenkins.io, langflow.org, r/kubernetes, r/node, r/reactjs — 10/4 seed, 10/5 첫 수집 예정 |
+| LearnFn | 10/4 force 실행 성공 (k8s-01). 트랙 라운드로빈이라 10/5 20:00은 **jk-01** |
+| 소스 가중치 | 피드백 반영 중 — 토스 1.45, YouTube 일부 1.1~1.15, r/LocalLLaMA·r/programming 0.5 |
+
+> 실패 소스 2건은 다음에 처리: 우아한형제들은 UA/대체 피드 확인 또는 `status` 비활성화, r/MachineLearning은 호출 순서·간격 조정 검토.
+> 상태 확인은 `aws logs filter-log-events --log-group-name /aws/lambda/<CollectFn> --filter-pattern '"collect 완료"'`.
+
+---
+
+## 4. 최초 배포 절차 (2026-07-20 실행 완료 — 재구축 시 참고)
 
 ```bash
 cd /Users/zayeonic/Projects/haries-work/hariesse
@@ -145,23 +166,22 @@ aws stepfunctions start-execution \
 |---|---|
 | 작업 디렉토리 | `/Users/zayeonic/Projects/haries-work/hariesse` |
 | AWS 계정 / 리전 | `611288736262` / `ap-northeast-2` (IAM user `nadeliv_adm`) |
-| CDK 스택 | `HariesseData`, `HariessePipeline` |
+| CDK 스택 | `HariesseData`, `HariessePipeline`, `HariesseApi` |
 | Notion 부모 페이지 | "My secretary" `38de549ed10280e6af9be92c7a6bfb3f` |
 | Notion DB | "hariesse Archive" `a22cbf53637840dc867d6cd8e7b2614e` |
 | Telegram 봇 | `@haries_work_bot`, chat_id `8657904581` |
 | Secrets Manager | `hariesse/telegram-bot-token`, `hariesse/notion-token` |
 | SSM (설정됨) | `/hariesse/telegram-chat-id`, `/hariesse/notion-database-id` |
 | SSM (미설정, 코드 기본값 사용) | `bedrock-model-id`, `bedrock-region`, `exploration-ratio`, `daily-bedrock-cap`, `daily-curate-cap`, `digest-size`(최대 4), `digest-min-size`(최소 2), `digest-min-score`(70) |
-| 스케줄 | 매일 **07:00 KST** (= 22:00 UTC) |
+| 스케줄 | 다이제스트 매일 **07:00 KST** (= 22:00 UTC) / 학습 레슨 매일 **20:00 KST** (= 11:00 UTC) |
 
-시드 소스 13개 (`scripts/seed.ts`):
+시드 소스 23개 (`scripts/seed.ts`) — 기존 13개 + 학습 연계 10개(2026-10-04 추가):
 - blog(3): AWS Architecture Blog(cloud), 우아한형제들(dev-ai), 토스(dev-ai)
 - youtube(4): Fireship, Two Minute Papers, 노마드 코더(dev-ai), Amazon Web Services(cloud)
 - reddit(6): r/programming, r/LocalLLaMA, r/MachineLearning(dev-ai), r/aws, r/devops(cloud), r/solotravel(travel)
+- 학습 연계(10): Kubernetes·CNCF·Jenkins(cloud), Node.js·Langflow·React·web.dev(dev-ai) 블로그 + r/kubernetes(cloud)·r/node·r/reactjs(dev-ai)
 
 신규 소스는 weight 0.8로 시작(기존 블로그 1.0보다 낮게) — 피드백으로 올라가게 둔다.
-
-> ⚠️ 이 디렉토리는 **git 저장소가 아니다.** 배포 전에 `git init` 하는 걸 권장.
 
 ---
 
