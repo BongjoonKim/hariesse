@@ -32,7 +32,7 @@
 > - 실측 검증(로컬): Fireship 15건 / r/programming·r/LocalLLaMA·r/aws·r/solotravel 정상 파싱 / 토스 20건.
 > - **배포 필요**: `npx cdk deploy --all` 후 `npm run seed`(신규 소스 10건만 추가됨).
 
-> 🆕 **2026-09-30 학습 트랙 증분 (코드 완료 · 배포 대기).**
+> ✅ **2026-09-30 학습 트랙 증분 — 2026-10-04 배포·E2E 검증 완료.**
 > 목적: AI를 잘 쓰기 위한 기본기(cloud / backend / frontend / cicd)를 매일 조금씩. 다이제스트와 별개 메시지.
 > - `LearnFn` + EventBridge **매일 20:00 KST (11:00 UTC)**. Bedrock이 레슨 1건을 JSON으로 쓰고
 >   (개념 / 왜 중요한가 / 핵심 / 예제 코드 / AI에게 시킬 때 / 10분 실습 / 퀴즈(스포일러)), Telegram 전송 + Notion "학습노트" 페이지 생성.
@@ -43,9 +43,9 @@
 > - seed에 학습 연계 소스 10건 추가 (Kubernetes/CNCF/Jenkins/Node.js/Langflow/React/web.dev 블로그 + r/kubernetes·r/node·r/reactjs),
 >   기존 Profile에는 없는 관심사 키만 추가(Kubernetes, Jenkins, CI/CD, Node.js, Langflow, 프론트엔드).
 > - 로컬 실측: Bedrock(sonnet-4-5)으로 jk-01 생성 25초, 2.3k자 1메시지. 단위테스트 93개 통과, `cdk synth` 성공.
-> - ⚠️ **배포 전 주의**: 2026-09-30 현재 AWS에 올라간 코드는 미머지 브랜치 `claude/telegram-daily-posts-reduce-b658e4`
->   (다이제스트 2~4건) 기준이다. 이 브랜치를 그대로 `cdk deploy`하면 그 변경이 되돌아간다 → 먼저 Prod에 합친 뒤 배포할 것.
-> - 배포 후: `npm run seed` (신규 소스·관심사만 추가) → `aws lambda invoke --function-name <LearnFunctionName> --payload '{"force":true}' --cli-binary-format raw-in-base64-out /dev/stdout` 로 1회 확인.
+> - 2026-10-04 배포: `dface73`(다이제스트 2~4건) 위에 rebase 후 Prod ff-merge → `cdk deploy --all` → seed(신규 소스 10건 + 관심사 6개).
+>   `LearnFn`(`HariessePipeline-LearnFn82657FAF-EATxOFghnm26`)을 `{"force":true}`로 실행 → k8s-01 Telegram 1메시지 + 관련 글 2건 + Notion 학습노트 생성 확인.
+>   진도: `turn=1, next.k8s=1, lastSentDate=2026-10-04` → 당일 20:00 정기 실행은 건너뛰고 다음 날 jk-01부터.
 
 ---
 
