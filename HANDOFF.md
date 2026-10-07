@@ -131,6 +131,9 @@
 >   우회(프록시 등)는 하지 않고 `status=muted`로 비활성화 (`mutedReason`/`mutedAt` 기록, weight 보존). 다시 켜려면 `status=active`.
 > - Reddit 429: r/MachineLearning 고유 문제가 아니었다 (9/26~29엔 r/aws가 같은 식으로 실패). 익명 RSS는 요청 1번에
 >   `x-ratelimit-remaining: 0`, `x-ratelimit-reset: ~50초`라 30초 백오프 1회로는 부족 → 백오프 `[30s, 60s]` + 서버 대기 헤더 존중(상한 90초).
+>   2026-10-07 배포 (`CollectFn`만 변경). 배포 전 10/4~10/6은 Reddit 9개 중 매일 2개(r/aws, r/MachineLearning) 429.
+>   로컬 실측: 9개 전부 성공, 단 첫 요청 외엔 거의 매번 429 → ~60초 대기 후 성공이라 **Reddit 구간만 ~8분**.
+>   collect 전체 ~10분 예상 (타임아웃 14분). 서브레딧을 더 늘리면 타임아웃 여유부터 확인할 것.
 > 상태 확인은 `aws logs filter-log-events --log-group-name /aws/lambda/<CollectFn> --filter-pattern '"collect 완료"'`.
 
 ---
