@@ -8,6 +8,8 @@
  *
  * 시드 세트: 환경변수 SEED_SET (기본 `default` = 내 것: 여행/개발·AI/클라우드).
  *   SEED_SET=design → 디자인 배포(stage=design)용 UX/UI·그래픽·브랜드 소스 + 디자인 Profile.
+ *   SEED_SET=space  → 같은 디자인 배포를 공간 디자이너용으로: 공간·건축·가구·공간 브랜딩 소스 + 공간 Profile.
+ *   `--set <name>` 인자로도 고를 수 있다(환경변수보다 우선, Windows에서도 동작).
  *   세트를 잘못 고르면 다른 사람 테이블에 엉뚱한 소스가 들어가니, SOURCES_TABLE이 어느 stage 것인지 확인할 것.
  *
  * 테이블 이름은 `cdk deploy`의 CfnOutput(SourcesTableName/ProfileTableName)에서 확인.
@@ -23,7 +25,9 @@ import type { Source, Profile, SourceType } from '../src/lib/types';
 
 const SOURCES_TABLE = process.env.SOURCES_TABLE;
 const PROFILE_TABLE = process.env.PROFILE_TABLE;
-const SEED_SET = (process.env.SEED_SET ?? 'default').trim();
+// `--set <name>`이 환경변수보다 우선 — Windows(cmd)에서는 `SEED_SET=x cmd` 형태의 npm 스크립트가 안 돈다.
+const setArgIdx = process.argv.indexOf('--set');
+const SEED_SET = ((setArgIdx >= 0 ? process.argv[setArgIdx + 1] : undefined) ?? process.env.SEED_SET ?? 'default').trim();
 
 function source(
   domain: string,
@@ -187,9 +191,58 @@ interface SeedSet {
   interestAdditions: Record<string, number>;
 }
 
+// ======================================================================
+// 공간 디자인 세트 (stage=design, 공간 디자이너용) — 피드 생존은 2026-10-04 확인. 카테고리는 전부 'design'.
+// 공간·건축·가구·공간 브랜딩(리테일) 위주. persona(SSM user-persona)와 함께 쓴다.
+// ======================================================================
+const SPACE_SOURCES: Source[] = [
+  // ---- 블로그(RSS) ----
+  source('dezeen.com', 'Dezeen', 'design', 'https://www.dezeen.com/feed/', 1.0),
+  source('archdaily.com', 'ArchDaily', 'design', 'https://www.archdaily.com/feed', 1.0),
+  source('designboom.com', 'designboom', 'design', 'https://www.designboom.com/feed/', 1.0),
+  source('retaildesignblog.net', 'Retail Design Blog', 'design', 'https://retaildesignblog.net/feed/', 1.0),
+  source('design.co.kr', '월간 디자인', 'design', 'https://design.co.kr/feed/', 1.0),
+  source('wallpaper.com', 'Wallpaper*', 'design', 'https://www.wallpaper.com/feeds/all', 0.8),
+  source('architecturaldigest.com', 'Architectural Digest', 'design', 'https://www.architecturaldigest.com/feed/rss', 0.8),
+  source('architizer.com', 'Architizer Journal', 'design', 'https://architizer.com/blog/feed/', 0.8),
+  source('design-milk.com', 'Design Milk', 'design', 'https://design-milk.com/feed/', 0.8),
+  source('leibal.com', 'Leibal', 'design', 'https://leibal.com/feed/', 0.8),
+  source('yankodesign.com', 'Yanko Design', 'design', 'https://www.yankodesign.com/feed/', 0.8),
+
+  // ---- YouTube (채널 ID는 2026-10-04 확인) ----
+  youtube('UCsWG9ANbrmgR0z-eFk_A3YQ', 'Dezeen', 'design'), // @dezeen
+  youtube('UC0k238zFx-Z8xFH0sxCrPJg', 'Architectural Digest', 'design'), // @Archdigest
+  youtube('UC_zQ777U6YTyatP3P1wi3xw', 'NEVER TOO SMALL', 'design'), // @NeverTooSmall
+  youtube('UCgxg48_pay4R67s-7WOgWFA', 'The Local Project', 'design'), // @TheLocalProject
+  youtube('UCKdTgHHnrxr4idSp99Yo0fQ', 'Dwell', 'design'), // @dwell
+  youtube('UCv6JHGYnS74viHnZ-6zR2Jg', 'designboom', 'design'), // @designboom
+  youtube('UCYAm24PkejQR2xMgJgn7xwg', 'Stewart Hicks', 'design'), // @StewartHicks
+  youtube('UC6n8I1UDTKP1IWjQMg6_TwA', 'The B1M', 'design'), // @TheB1M
+
+  // ---- Reddit ----
+  reddit('architecture', 'r/architecture', 'design'),
+  reddit('InteriorDesign', 'r/InteriorDesign', 'design'),
+];
+
+const SPACE_PROFILE: Profile = {
+  pk: 'PROFILE',
+  interests: {
+    '공간 디자인': 1.0,
+    인테리어: 1.0,
+    건축: 1.0,
+    '가구 디자인': 1.0,
+    '공간 브랜딩': 1.0,
+    '리테일 디자인': 1.0,
+    '공간 마케팅': 0.8,
+  },
+  explorationRatio: DEFAULTS.EXPLORATION_RATIO,
+  updatedAt: new Date().toISOString(),
+};
+
 const SEED_SETS: Record<string, SeedSet> = {
   default: { sources: DEFAULT_SOURCES, profile: DEFAULT_PROFILE, interestAdditions: DEFAULT_INTEREST_ADDITIONS },
   design: { sources: DESIGN_SOURCES, profile: DESIGN_PROFILE, interestAdditions: {} },
+  space: { sources: SPACE_SOURCES, profile: SPACE_PROFILE, interestAdditions: {} },
 };
 
 async function main() {
