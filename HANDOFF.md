@@ -60,6 +60,7 @@
 > - 검증: `tsc`, 단위테스트 97개 통과, `cdk synth` 양쪽 성공. `cdk diff`(내 스택) = Lambda 코드 해시 + Outputs 추가만, IAM/환경변수 변화 없음.
 > - **배포 명령 (내가 실행)**: `npm run deploy:design` → 운영자 액세스 키 발급 → 여자친구 PC로 전달 → `docs/OPERATOR.md` §3.
 >   내 스택도 코드가 바뀌었으니(persona 지원, Outputs) 다음 `npx cdk deploy --all`에서 같이 올라간다. 급하지 않음.
+> - ⚠️ **bdb793c를 Prod에 머지할 때 `2e0acab`(SSM GetParameters 10개씩 나눠 조회, PR #2)도 반드시 같이 넣을 것.** 빠지면 `user-persona`로 SSM 이름이 11개가 되어 모든 Lambda의 `getConfig()`가 ValidationException으로 죽는다(design은 10/4~10/10 7회 연속 실패).
 
 ---
 
