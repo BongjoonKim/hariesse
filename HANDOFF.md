@@ -52,7 +52,7 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
-> 🆕 **2026-10-11 TOEFL 단어장 증분 — 코드 완료 · 배포 대기** (브랜치 `claude/toefl-vocab-tracking-971d54` → `develop`).
+> 🆕 **2026-10-11 TOEFL 단어장 증분 — 2026-10-11 배포 완료** (브랜치 `claude/toefl-vocab-tracking-971d54` → `develop` d12e86b, Prod 미반영).
 > 목적: TOEFL 공부 중 만난 단어·표현·문장을 Telegram이나 Notion에 적어 두면 뜻을 채워 주고, 간격 반복으로 복습시킨다.
 > - **원본 저장소 = Notion DB "TOEFL Vocab"** (`5582e65c809b45e1b420325db9fc9adb`, 부모 페이지 `38de549e…` = hariesse Archive와 같은 위치. 그 페이지 이름이 "My secretary" → "봉준 개발목록"으로 바뀜).
 >   DynamoDB에 따로 저장하지 않는다. 양쪽에서 수정되니 동기화 충돌을 피하려고 Notion 하나로 둠. 뷰: 기본 / 📅 복습 순서 / ❗ 자주 헷갈림.
@@ -67,13 +67,18 @@
 > - `VocabFn` 비동기 재시도 0회 (재시도되면 같은 표현이 '또 헷갈림'으로 집계됨). 정기 발송일은 Profile `pk='VOCAB'`.
 > - SSM 이름이 12개가 되어 `getConfig()`를 10개씩 나눠 조회하도록 고쳤다. `fix/ssm-getparameters-limit`(2e0acab)와 같은 수정이라 합칠 때 충돌나면 한쪽만 남기면 된다.
 > - 검증: `tsc`, 단위테스트 136개(신규 31), `cdk synth` 성공.
-> - **배포 절차 (아직 안 함)**
+> - **배포 절차 (2026-10-11 실행함 — 재배포 시 참고)**
 >   1. `aws ssm put-parameter --name /hariesse/vocab-notion-database-id --type String --value 5582e65c809b45e1b420325db9fc9adb --region ap-northeast-2`
 >   2. `AWS_REGION=ap-northeast-2 npx cdk deploy --all` — 로컬 AWS 설정에 리전이 없어서 안 주면 **us-east-1로 합성된다**.
 >      Windows에서 번들링이 `npm.ps1` 실행 정책에 막히면 이 프로세스에만 `PSExecutionPolicyPreference=Bypass`를 준다.
 >   3. **setWebhook을 다시 등록**: `allowed_updates=["callback_query","message"]` (지금은 callback_query만 받아서 메시지가 안 온다). URL·secret_token은 기존 그대로.
 >   4. Notion hariesse 연동이 새 DB에 접근되는지 확인. 부모 페이지에서 권한이 상속되는데, 안 되면 DB의 ⋯ → 연결에서 추가.
 >   5. E2E: 봇에 단어 1개 + 문장 1개 → 카드 답장 + Notion 행 확인 → `/review` → 버튼 → `다음 복습` 갱신 확인.
+> - 2026-10-11 실행 기록: 이 Windows PC는 기본 AWS 프로필이 없다 → `AWS_PROFILE=nadeliv`(nadeliv_adm). Git Bash에선 SSM 경로가 Windows 경로로 바뀌니 `MSYS_NO_PATHCONV=1`.
+>   `cdk diff` = VocabFn·스케줄·권한 추가 + 기존 함수 코드 해시만 (삭제/교체 없음). Design 스택(`HariesseDesign*`)은 이 브랜치 `bin/app.ts`에 없어서 안 건드림.
+>   setWebhook allowed_updates = `["message","callback_query"]`로 변경 확인. VocabFn = `HariessePipeline-VocabFnBDF53B75-B0nLW1kr3Orc`.
+>   VocabFn capture 직접 호출(단어 corroborate + 문장 1개) → Notion 2행 + 카드 답장 OK (11초). Notion에 `mitigate`만 넣고 `{"type":"review","force":true}` → 빈 칸 채움 OK.
+>   퀴즈 1건 발송 OK. **남은 확인: 실제 폰에서 메시지 보내기(webhook message 경로) + 퀴즈 버튼 누르기(t1 callback).**
 
 ---
 
