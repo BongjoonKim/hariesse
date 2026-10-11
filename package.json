@@ -30,9 +30,10 @@
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.670.0",
     "@aws-sdk/client-dynamodb": "^3.670.0",
+    "@aws-sdk/client-lambda": "^3.1149.0",
     "@aws-sdk/client-s3": "^3.670.0",
-    "@aws-sdk/client-ssm": "^3.670.0",
     "@aws-sdk/client-secrets-manager": "^3.670.0",
+    "@aws-sdk/client-ssm": "^3.670.0",
     "@aws-sdk/lib-dynamodb": "^3.670.0",
     "@mozilla/readability": "^0.5.0",
     "aws-cdk-lib": "^2.160.0",

@@ -1,7 +1,8 @@
 import { encodeCallback } from '../domain/feedback';
 import { AREA_LABEL } from '../domain/curriculum';
 import { encodeLessonCallback, type LessonPlan } from '../domain/learning';
-import type { Article, Category, LessonContent, SourceType } from './types';
+import { encodeVocabCallback, shortDate, KIND_LABEL } from '../domain/vocab';
+import type { Article, Category, LessonContent, SourceType, VocabEntry } from './types';
 
 const CATEGORY_LABEL: Record<Category, string> = {
   travel: '여행',
@@ -241,4 +242,101 @@ export async function sendLesson(
     const isLast = i === messages.length - 1;
     await sendMessage(token, chatId, messages[i], isLast ? buildLessonKeyboard(lessonId) : undefined, true);
   }
+}
+
+// ---------------------------------------------------------------- TOEFL 단어장
+
+export function buildVocabSavedKeyboard(pageId: string): InlineKeyboard {
+  return { inline_keyboard: [[{ text: '🗑 삭제', callback_data: encodeVocabCallback('delete', pageId) }]] };
+}
+
+export function buildReviewKeyboard(pageId: string): InlineKeyboard {
+  return {
+    inline_keyboard: [
+      [
+        { text: '✅ 알아요', callback_data: encodeVocabCallback('know', pageId) },
+        { text: '❌ 몰라요', callback_data: encodeVocabCallback('forgot', pageId) },
+      ],
+    ],
+  };
+}
+
+function vocabHeadline(entry: VocabEntry): string {
+  const meta = [entry.pronunciation, entry.pos].filter(Boolean).map((s) => escapeHtml(s!));
+  return `<b>${escapeHtml(clip(entry.text, 500))}</b>${meta.length ? `  ${meta.join(' · ')}` : ''}`;
+}
+
+/** 뜻·예문·동의어·메모 줄 (카드와 복습 정답에서 같이 쓴다). */
+function vocabDetailLines(entry: VocabEntry): string[] {
+  const isSentence = entry.kind === 'sentence';
+  const lines: string[] = [];
+  if (entry.meaning) lines.push(`${isSentence ? '번역' : '뜻'}: ${escapeHtml(clip(entry.meaning, 600))}`);
+  if (entry.example) lines.push(`예문: ${escapeHtml(clip(entry.example, 600))}`);
+  if (entry.synonyms) lines.push(`동의어: ${escapeHtml(clip(entry.synonyms, 200))}`);
+  if (entry.note) lines.push(`💡 ${escapeHtml(clip(entry.note, 600))}`);
+  return lines;
+}
+
+/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄. 순수함수. */
+export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean }): string {
+  const kind = entry.kind ? KIND_LABEL[entry.kind] : '표현';
+  const lines = [
+    opts.repeated
+      ? `📌 <b>이미 있는 ${kind}예요</b> · 헷갈린 횟수 ${entry.missCount}`
+      : `📝 <b>저장했어요</b> · ${kind}`,
+    vocabHeadline(entry),
+    ...vocabDetailLines(entry),
+  ];
+  if (!entry.meaning) lines.push('⚠️ 뜻을 아직 못 채웠어요. 다음 복습 때 다시 채울게요.');
+  if (entry.tags.length) lines.push(`🏷 ${entry.tags.map((t) => `#${escapeHtml(t)}`).join(' ')}`);
+  if (entry.status === 'mastered') lines.push('🎓 외운 표현이에요');
+  else if (entry.nextReview) lines.push(`🗓 다음 복습 ${shortDate(entry.nextReview)}`);
+  return lines.join('\n');
+}
+
+export function formatReviewHeader(count: number, remaining: number): string {
+  const more = remaining > 0 ? `\n<i>밀린 복습 ${remaining}개는 다음에 이어서 나와요</i>` : '';
+  return `🧠 <b>오늘의 TOEFL 복습</b> — ${count}개\n떠올려 보고 정답을 확인한 뒤 버튼을 눌러 주세요.${more}`;
+}
+
+/** 복습 퀴즈 1건 — 표현만 보이고 뜻은 스포일러로 가린다. 순수함수. */
+export function formatReviewItem(entry: VocabEntry, index: number, total: number): string {
+  const miss = entry.missCount > 0 ? ` · ❗헷갈림 ${entry.missCount}회` : '';
+  const answer = vocabDetailLines(entry).join('\n') || '(뜻 없음 — Notion에서 채워 주세요)';
+  return [
+    `🧠 ${index + 1}/${total} · 📦 박스 ${entry.box}${miss}`,
+    vocabHeadline(entry),
+    `정답 보기 → <tg-spoiler>${answer}</tg-spoiler>`,
+  ].join('\n');
+}
+
+/** 사용자 메시지에 답장으로 보낸다 (어떤 입력에 대한 카드인지 보이게). */
+export async function sendReply(
+  token: string,
+  chatId: string,
+  text: string,
+  replyToMessageId?: number,
+  replyMarkup?: InlineKeyboard
+): Promise<void> {
+  await callTelegram(token, 'sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } } : {}),
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
+}
+
+/** 버튼을 누른 메시지에서 버튼을 지운다 (이미 답한 퀴즈를 또 누르지 않게). */
+export async function clearInlineKeyboard(token: string, chatId: number | string, messageId: number): Promise<void> {
+  await callTelegram(token, 'editMessageReplyMarkup', {
+    chat_id: chatId,
+    message_id: messageId,
+    reply_markup: { inline_keyboard: [] },
+  });
+}
+
+export function formatVocabError(text: string, reason: string): string {
+  return `⚠️ 저장하지 못했어요: <b>${escapeHtml(clip(text, 200))}</b>\n<i>${escapeHtml(clip(reason, 300))}</i>`;
 }

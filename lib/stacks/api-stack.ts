@@ -13,6 +13,8 @@ export interface ApiStackProps extends cdk.StackProps {
   articlesTable: dynamodb.Table;
   profileTable: dynamodb.Table;
   rawBucket: s3.Bucket;
+  /** TOEFL 단어장 Lambda (PipelineStack) — Telegram 메시지를 비동기로 넘긴다 */
+  vocabFn: lambda.IFunction;
 }
 
 /**
@@ -24,7 +26,7 @@ export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    const { sourcesTable, articlesTable, profileTable, rawBucket } = props;
+    const { sourcesTable, articlesTable, profileTable, rawBucket, vocabFn } = props;
 
     const feedbackFn = new NodejsFunction(this, 'FeedbackFn', {
       entry: path.join(__dirname, '..', '..', 'src', 'handlers', 'feedback', 'index.ts'),
@@ -39,6 +41,7 @@ export class ApiStack extends cdk.Stack {
         [ENV.ARTICLES_TABLE]: articlesTable.tableName,
         [ENV.PROFILE_TABLE]: profileTable.tableName,
         [ENV.RAW_BUCKET]: rawBucket.bucketName,
+        [ENV.VOCAB_FUNCTION_NAME]: vocabFn.functionName,
       },
       bundling: {
         externalModules: ['@aws-sdk/*'],
@@ -67,6 +70,7 @@ export class ApiStack extends cdk.Stack {
     articlesTable.grantReadWriteData(feedbackFn);
     sourcesTable.grantReadWriteData(feedbackFn);
     profileTable.grantReadWriteData(feedbackFn);
+    vocabFn.grantInvoke(feedbackFn);
 
     const fnUrl = feedbackFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE, // 인증은 핸들러의 secret_token 검증

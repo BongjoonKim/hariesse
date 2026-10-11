@@ -14,7 +14,7 @@ const env: cdk.Environment = {
 
 const data = new DataStack(app, 'HariesseData', { env });
 
-new PipelineStack(app, 'HariessePipeline', {
+const pipeline = new PipelineStack(app, 'HariessePipeline', {
   env,
   sourcesTable: data.sourcesTable,
   articlesTable: data.articlesTable,
@@ -28,6 +28,7 @@ new ApiStack(app, 'HariesseApi', {
   articlesTable: data.articlesTable,
   profileTable: data.profileTable,
   rawBucket: data.rawBucket,
+  vocabFn: pipeline.vocabFn,
 });
 
 app.synth();

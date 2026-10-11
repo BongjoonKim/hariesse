@@ -83,3 +83,50 @@ export interface LessonContent {
   practice: string;
   quiz?: { question: string; answer: string };
 }
+
+// ---------------------------------------------------------------- TOEFL 단어장
+
+/** 단어·짧은 표현 vs 문장. 문장은 품사 대신 번역 + 핵심 표현을 채운다. */
+export type VocabKind = 'word' | 'sentence';
+/** new = 아직 뜻을 안 채움(Notion에 직접 넣은 직후 등), learning = 복습 중, mastered = 외움(복습 끝) */
+export type VocabStatus = 'new' | 'learning' | 'mastered';
+export type VocabOrigin = 'telegram' | 'notion';
+
+/** Bedrock이 채워주는 단어 정보. 문장이면 meaning = 한국어 번역. */
+export interface VocabEnrichment {
+  meaning: string;
+  pos?: string;
+  pronunciation?: string;
+  example?: string;
+  exampleKo?: string;
+  synonyms: string[];
+  /** TOEFL 팁(콜로케이션·자주 나오는 맥락) / 문장이면 핵심 표현 정리 */
+  note?: string;
+}
+
+/** Notion "TOEFL Vocab" DB 한 행. Notion이 원본 저장소다. */
+export interface VocabEntry {
+  /** Notion page id (하이픈 없는 32자) */
+  pageId: string;
+  text: string;
+  /** dedup 키 — normalizeVocabKey(text). Notion에서 직접 넣은 행은 enrich 전까지 비어 있다. */
+  key?: string;
+  kind?: VocabKind;
+  meaning?: string;
+  pos?: string;
+  pronunciation?: string;
+  example?: string;
+  synonyms?: string;
+  note?: string;
+  tags: string[];
+  /** Leitner 박스 0~5 */
+  box: number;
+  /** KST YYYY-MM-DD */
+  nextReview?: string;
+  lastReviewed?: string;
+  status?: VocabStatus;
+  missCount: number;
+  origin?: VocabOrigin;
+  /** KST YYYY-MM-DD (Notion created_time 기준) */
+  createdDate?: string;
+}

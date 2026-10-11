@@ -22,6 +22,9 @@ export interface PipelineStackProps extends cdk.StackProps {
 const SRC = path.join(__dirname, '..', '..', 'src', 'handlers');
 
 export class PipelineStack extends cdk.Stack {
+  /** TOEFL 단어장 Lambda — ApiStack의 Feedback Lambda가 비동기 호출한다 */
+  public readonly vocabFn: lambda.IFunction;
+
   constructor(scope: Construct, id: string, props: PipelineStackProps) {
     super(scope, id, props);
 
@@ -60,6 +63,12 @@ export class PipelineStack extends cdk.Stack {
     const deliverFn = makeFn('DeliverFn', 'deliver', 5, 512);
     // 학습 레슨 — Bedrock 1회 + Telegram/Notion. 다이제스트 파이프라인과 독립.
     const learnFn = makeFn('LearnFn', 'learn', 3, 512);
+    // TOEFL 단어장 — 기록(capture, Feedback이 비동기 호출) + 매일 복습. 원본 저장소는 Notion DB.
+    // 복습 실행은 뜻 채우기(Bedrock) 최대 VOCAB_ENRICH_CAP건이 먼저 돌아서 넉넉히.
+    const vocabFn = makeFn('VocabFn', 'vocab', 5, 512);
+    // 비동기 재시도 끔 — capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다.
+    vocabFn.configureAsyncInvoke({ retryAttempts: 0 });
+    this.vocabFn = vocabFn;
 
     // ---- IAM (최소권한) ----
     // SSM 파라미터 읽기
@@ -69,7 +78,7 @@ export class PipelineStack extends cdk.Stack {
         `arn:aws:ssm:${this.region}:${this.account}:parameter/hariesse/*`,
       ],
     });
-    [collectFn, curateFn, deliverFn, learnFn].forEach((fn) => fn.addToRolePolicy(ssmStmt));
+    [collectFn, curateFn, deliverFn, learnFn, vocabFn].forEach((fn) => fn.addToRolePolicy(ssmStmt));
 
     // DynamoDB
     sourcesTable.grantReadWriteData(collectFn);
@@ -85,6 +94,8 @@ export class PipelineStack extends cdk.Stack {
     profileTable.grantReadWriteData(learnFn); // 진도 = pk 'LEARNING'
     articlesTable.grantReadData(learnFn); // 관련 글 찾기
 
+    profileTable.grantReadWriteData(vocabFn); // 정기 복습 발송일 = pk 'VOCAB'
+
     // Bedrock (curate, learn) — foundation model + 교차리전 추론 프로파일
     const bedrockStmt = new iam.PolicyStatement({
       actions: ['bedrock:InvokeModel'],
@@ -93,9 +104,9 @@ export class PipelineStack extends cdk.Stack {
         `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
       ],
     });
-    [curateFn, learnFn].forEach((fn) => fn.addToRolePolicy(bedrockStmt));
+    [curateFn, learnFn, vocabFn].forEach((fn) => fn.addToRolePolicy(bedrockStmt));
 
-    // Secrets (deliver, learn) — Telegram + Notion 토큰
+    // Secrets (deliver, learn, vocab) — Telegram + Notion 토큰
     const secretsStmt = new iam.PolicyStatement({
       actions: ['secretsmanager:GetSecretValue'],
       resources: [
@@ -103,7 +114,7 @@ export class PipelineStack extends cdk.Stack {
         `arn:aws:secretsmanager:${this.region}:${this.account}:secret:${SECRETS.NOTION_TOKEN}-*`,
       ],
     });
-    [deliverFn, learnFn].forEach((fn) => fn.addToRolePolicy(secretsStmt));
+    [deliverFn, learnFn, vocabFn].forEach((fn) => fn.addToRolePolicy(secretsStmt));
 
     // ---- Step Functions: Collect → Curate → Deliver ----
     const collectTask = new tasks.LambdaInvoke(this, 'Collect', {
@@ -139,7 +150,19 @@ export class PipelineStack extends cdk.Stack {
       targets: [new targets.LambdaFunction(learnFn)],
     });
 
+    // ---- TOEFL 단어장 복습: 매일 21:00 KST (= 12:00 UTC) — 20:00 레슨 다음 ----
+    new events.Rule(this, 'DailyVocabReviewSchedule', {
+      schedule: events.Schedule.cron({ minute: '0', hour: '12' }),
+      targets: [
+        new targets.LambdaFunction(vocabFn, {
+          event: events.RuleTargetInput.fromObject({ type: 'review' }),
+          retryAttempts: 0,
+        }),
+      ],
+    });
+
     new cdk.CfnOutput(this, 'LearnFunctionName', { value: learnFn.functionName });
+    new cdk.CfnOutput(this, 'VocabFunctionName', { value: vocabFn.functionName });
     new cdk.CfnOutput(this, 'StateMachineArn', { value: stateMachine.stateMachineArn });
     new cdk.CfnOutput(this, 'SsmPrefix', { value: '/hariesse/' });
     new cdk.CfnOutput(this, 'NotionDbParam', { value: SSM.NOTION_DATABASE_ID });

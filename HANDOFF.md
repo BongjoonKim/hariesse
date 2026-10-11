@@ -52,6 +52,29 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
+> 🆕 **2026-10-11 TOEFL 단어장 증분 — 코드 완료 · 배포 대기** (브랜치 `claude/toefl-vocab-tracking-971d54` → `develop`).
+> 목적: TOEFL 공부 중 만난 단어·표현·문장을 Telegram이나 Notion에 적어 두면 뜻을 채워 주고, 간격 반복으로 복습시킨다.
+> - **원본 저장소 = Notion DB "TOEFL Vocab"** (`5582e65c809b45e1b420325db9fc9adb`, 부모 페이지 `38de549e…` = hariesse Archive와 같은 위치. 그 페이지 이름이 "My secretary" → "봉준 개발목록"으로 바뀜).
+>   DynamoDB에 따로 저장하지 않는다. 양쪽에서 수정되니 동기화 충돌을 피하려고 Notion 하나로 둠. 뷰: 기본 / 📅 복습 순서 / ❗ 자주 헷갈림.
+> - 입력 ① Telegram: 봇에 그냥 보내면 됨. 한 줄 = 1건, `표현 :: 내 뜻 #태그`는 선택. ≤4단어이고 문장부호로 끝나지 않으면 '단어', 아니면 '문장'(번역 + 핵심 표현).
+>   Feedback Lambda가 **내 채팅(SSM telegram-chat-id)만** 받아서 `VocabFn`을 **비동기 호출**하고 바로 200을 준다(Bedrock 대기로 webhook 재전송이 생기지 않게).
+>   같은 표현(키 = 소문자·공백 정규화)을 또 보내면 새 행 대신 `헷갈린 횟수 +1`이고, 외운 표현이면 박스 1로 되살린다.
+> - 입력 ② Notion: `표현`만 적으면 됨. 매일 복습 실행 때 `상태`가 비었거나 '새로 추가'인 행의 **빈 칸만** Bedrock으로 채운다(사용자가 적은 뜻·예문은 안 덮음, 1회 최대 20건).
+> - 복습: `VocabFn` + EventBridge **매일 21:00 KST (12:00 UTC)**. 차례가 된 표현(밀린 순 → 헷갈린 순) 최대 `vocab-review-size`(기본 10)개.
+>   뜻은 스포일러로 가리고 버튼 `[✅ 알아요][❌ 몰라요]`. Leitner 박스 0→5, 간격 1·1·3·7·14·30일, 박스 5에서 ✅ = '외움'.
+>   같은 KST 날짜엔 1번만 반영(`마지막 복습`). 누르면 버튼이 사라진다. `/review` = 지금 바로 복습(정기 발송 기록은 안 건드림), 그 밖의 `/명령` = 사용법.
+> - callback prefix `t1|k|f|x` + Notion page id(하이픈 제거 32자). 저장 카드의 `🗑 삭제` = Notion 휴지통 이동.
+> - `VocabFn` 비동기 재시도 0회 (재시도되면 같은 표현이 '또 헷갈림'으로 집계됨). 정기 발송일은 Profile `pk='VOCAB'`.
+> - SSM 이름이 12개가 되어 `getConfig()`를 10개씩 나눠 조회하도록 고쳤다. `fix/ssm-getparameters-limit`(2e0acab)와 같은 수정이라 합칠 때 충돌나면 한쪽만 남기면 된다.
+> - 검증: `tsc`, 단위테스트 136개(신규 31), `cdk synth` 성공.
+> - **배포 절차 (아직 안 함)**
+>   1. `aws ssm put-parameter --name /hariesse/vocab-notion-database-id --type String --value 5582e65c809b45e1b420325db9fc9adb --region ap-northeast-2`
+>   2. `AWS_REGION=ap-northeast-2 npx cdk deploy --all` — 로컬 AWS 설정에 리전이 없어서 안 주면 **us-east-1로 합성된다**.
+>      Windows에서 번들링이 `npm.ps1` 실행 정책에 막히면 이 프로세스에만 `PSExecutionPolicyPreference=Bypass`를 준다.
+>   3. **setWebhook을 다시 등록**: `allowed_updates=["callback_query","message"]` (지금은 callback_query만 받아서 메시지가 안 온다). URL·secret_token은 기존 그대로.
+>   4. Notion hariesse 연동이 새 DB에 접근되는지 확인. 부모 페이지에서 권한이 상속되는데, 안 되면 DB의 ⋯ → 연결에서 추가.
+>   5. E2E: 봇에 단어 1개 + 문장 1개 → 카드 답장 + Notion 행 확인 → `/review` → 버튼 → `다음 복습` 갱신 확인.
+
 ---
 
 ## 1. 프로젝트가 뭔가
@@ -174,13 +197,13 @@ aws stepfunctions start-execution \
 | 작업 디렉토리 | `/Users/zayeonic/Projects/haries-work/hariesse` |
 | AWS 계정 / 리전 | `611288736262` / `ap-northeast-2` (IAM user `nadeliv_adm`) |
 | CDK 스택 | `HariesseData`, `HariessePipeline`, `HariesseApi` |
-| Notion 부모 페이지 | "My secretary" `38de549ed10280e6af9be92c7a6bfb3f` |
-| Notion DB | "hariesse Archive" `a22cbf53637840dc867d6cd8e7b2614e` |
+| Notion 부모 페이지 | "봉준 개발목록"(구 "My secretary") `38de549ed10280e6af9be92c7a6bfb3f` |
+| Notion DB | "hariesse Archive" `a22cbf53637840dc867d6cd8e7b2614e` / "TOEFL Vocab" `5582e65c809b45e1b420325db9fc9adb` (SSM `/hariesse/vocab-notion-database-id`) |
 | Telegram 봇 | `@haries_work_bot`, chat_id `8657904581` |
 | Secrets Manager | `hariesse/telegram-bot-token`, `hariesse/notion-token` |
 | SSM (설정됨) | `/hariesse/telegram-chat-id`, `/hariesse/notion-database-id` |
 | SSM (미설정, 코드 기본값 사용) | `bedrock-model-id`, `bedrock-region`, `exploration-ratio`, `daily-bedrock-cap`, `daily-curate-cap`, `digest-size`(최대 4), `digest-min-size`(최소 2), `digest-min-score`(70) |
-| 스케줄 | 다이제스트 매일 **07:00 KST** (= 22:00 UTC) / 학습 레슨 매일 **20:00 KST** (= 11:00 UTC) |
+| 스케줄 | 다이제스트 매일 **07:00 KST** (= 22:00 UTC) / 학습 레슨 매일 **20:00 KST** (= 11:00 UTC) / TOEFL 복습 매일 **21:00 KST** (= 12:00 UTC) |
 
 시드 소스 23개 (`scripts/seed.ts`) — 기존 13개 + 학습 연계 10개(2026-10-04 추가):
 - blog(3): AWS Architecture Blog(cloud), 우아한형제들(dev-ai), 토스(dev-ai)
