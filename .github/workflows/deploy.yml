@@ -1,0 +1,46 @@
+# 배포: Prod에 push(= develop → Prod PR 머지)되면 cdk deploy.
+# 로컬 `cdk deploy`는 하지 않는다 — 배포된 코드가 항상 GitHub Prod와 같아야 한다 (CLAUDE.md "브랜치 / 배포 규칙").
+#
+# 인증: GitHub OIDC → IAM Role `hariesse-github-deploy` (infra/github-deploy-role.yaml).
+# 이 Role은 이 리포의 Prod 브랜치에서만 assume되고, 할 수 있는 일은 CDK 부트스트랩 Role을 assume하는 것뿐이다.
+name: Deploy
+
+on:
+  push:
+    branches: [Prod]
+  workflow_dispatch: # 재배포가 필요할 때 Actions 탭에서 수동 실행 (Prod 브랜치에서만 Role이 열린다)
+
+permissions:
+  id-token: write
+  contents: read
+
+# 배포가 겹치면 CloudFormation이 꼬인다. 진행 중인 배포는 취소하지 않고 줄 세운다.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::611288736262:role/hariesse-github-deploy
+          aws-region: ap-northeast-2
+
+      # 내 배포 (Hariesse*)
+      - run: npx cdk deploy --all --require-approval never
+
+      # 디자인 배포 (HariesseDesign*) — stage 분리 코드가 Prod에 들어온 뒤부터 실행된다
+      - run: npm run --if-present deploy:design -- --require-approval never

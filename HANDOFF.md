@@ -80,6 +80,25 @@
 >   VocabFn capture 직접 호출(단어 corroborate + 문장 1개) → Notion 2행 + 카드 답장 OK (11초). Notion에 `mitigate`만 넣고 `{"type":"review","force":true}` → 빈 칸 채움 OK.
 >   퀴즈 1건 발송 OK. **남은 확인: 실제 폰에서 메시지 보내기(webhook message 경로) + 퀴즈 버튼 누르기(t1 callback).**
 
+> 🚧 **2026-10-14 브랜치·배포 흐름 전환 — 진행 중.** 규칙은 CLAUDE.md "브랜치 / 배포 규칙", 결정 이유는 §2.
+> - 추가: `.github/workflows/ci.yml`(PR 검증), `.github/workflows/deploy.yml`(Prod push → `cdk deploy --all` + `deploy:design`),
+>   `infra/github-deploy-role.yaml`(OIDC Role `hariesse-github-deploy`, Prod 브랜치 전용, CDK 부트스트랩 Role assume만 허용).
+> - `develop` 생성됨 (2026-10-14, Windows) = TOEFL 단어장(d12e86b, 44ef8fa). **배포된 것과 일치 확인** (Mac, 10/14):
+>   develop `cdk synth` vs 배포된 CloudFormation 템플릿 — `HariessePipeline` 27개·`HariesseApi` 7개 리소스 동일, 속성 차이는 CDKMetadata뿐
+>   (Lambda 코드 해시는 빌드 머신마다 달라 비교 제외). 테스트 136개·tsc·synth 통과.
+> - **아직 develop에 없는 것**: `claude/telegram-design-sharing-setup-46f864` (stage 분리 `HariesseDesign*`, 10/10 배포).
+>   develop과 코드 충돌 6곳(bin/app.ts, api-stack, pipeline-stack, constants, 문서 2) — 별도 PR로 합친다.
+>   **자동배포의 blocker는 아님**: Prod에 stage 코드가 없으면 `deploy:design`이 `--if-present`로 건너뛰고,
+>   `cdk deploy --all`은 앱에 없는 스택을 지우지 않으므로 `HariesseDesign*`은 그대로 남는다.
+>   SSM GetParameters 분할 fix(2e0acab)는 develop에 같은 수정이 이미 있다 → 충돌 시 develop 쪽 유지.
+> - ✅ Role 스택 `HariesseGithubDeploy` 배포 완료 (2026-10-14, Mac). trust = `repo:BongjoonKim/hariesse:ref:refs/heads/Prod`만,
+>   IAM 시뮬레이션: cdk 부트스트랩 Role assume = allowed, 그 밖의 Role(nadeliv-frontend-deploy 등) = deny.
+> - 남은 순서: ① 이 브랜치(`chore/branch-flow-ci`) → develop PR → ② (Role 완료) → ③ develop → Prod 머지로 첫 자동배포 → VocabFn·다이제스트·학습 레슨 동작 확인
+>   → ④ 디자인 브랜치를 develop 기준으로 충돌 해결해 PR.
+> - 권장: GitHub에서 Prod 브랜치 보호(PR 필수) — 실수로 Prod에 직접 push해 배포되는 것 방지.
+> - CI의 리전: `bin/app.ts`가 `CDK_DEFAULT_REGION ?? 'ap-northeast-2'`이고 deploy 잡은 `aws-region: ap-northeast-2`를 준다
+>   → 위 단어장 메모의 "리전 없으면 us-east-1로 합성" 문제는 CI에서 생기지 않는다.
+
 ---
 
 ## 1. 프로젝트가 뭔가
@@ -105,6 +124,7 @@
 | 리전 | **ap-northeast-2 (서울)** | 전 리소스 동일 리전 |
 | Bedrock 모델 | 기본 `apac.anthropic.claude-sonnet-4-20250514-v1:0` | 서울 ACTIVE 확인됨. SSM으로 교체 가능 |
 | 빌드 방식 | **워킹 스켈레톤 먼저** | 스펙의 "단계적 빌드" 원칙. 한 줄기를 끝까지 동작시킨 뒤 확장 |
+| 브랜치·배포 | **작업 브랜치 → develop PR → Prod 머지 시 GitHub Actions 자동배포** (2026-10-14). 로컬 `cdk deploy` 금지 | Mac·Windows 두 PC에서 작업하는데 Claude Code 세션·메모리는 PC 간 공유가 안 된다. Windows에서 로컬 배포한 VocabFn(10/11)이 GitHub에 없어 Mac에서 코드를 찾을 수 없었다. 배포 = GitHub Prod로 고정해 "배포된 것 = 리포에 있는 것"을 보장 |
 | 관리자 웹 | **보류** (2026-10-04) — 운영은 Claude Code 세션에서 AWS CLI로 | 1인용이라 웹은 인증·유지보수 부담 대비 효용이 낮음. Phase 2에서 가중치 등 시각화할 데이터가 생기면 읽기 전용 대시보드 재검토 |
 
 ---
@@ -263,6 +283,9 @@ aws stepfunctions start-execution \
 ---
 
 ## 8. 함정 메모
+
+- **"코드가 없는데 AWS엔 있다"** → 다른 PC에서 로컬 `cdk deploy`만 하고 push를 안 한 것. Claude Code 메모리·세션은 PC 간 공유되지 않는다.
+  배포는 Prod 머지(GitHub Actions)로만 할 것. 확인: `aws lambda list-functions`의 LastModified vs `git log origin/Prod`.
 
 - **Notion 403/object_not_found** → 토큰 문제가 아니라 페이지에 integration을 **Connections로 연결 안 한 것**이 1위 원인. (이번엔 연결 완료됨)
 - **jsdom 번들링** → esbuild로 직접 번들하면 깨진다. `NodejsFunction`의 `nodeModules`로 설치하는 방식 유지할 것. `package-lock.json`이 있어야 동작.
