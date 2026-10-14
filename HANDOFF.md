@@ -91,8 +91,9 @@
 >   **자동배포의 blocker는 아님**: Prod에 stage 코드가 없으면 `deploy:design`이 `--if-present`로 건너뛰고,
 >   `cdk deploy --all`은 앱에 없는 스택을 지우지 않으므로 `HariesseDesign*`은 그대로 남는다.
 >   SSM GetParameters 분할 fix(2e0acab)는 develop에 같은 수정이 이미 있다 → 충돌 시 develop 쪽 유지.
-> - 남은 순서: ① 이 브랜치(`chore/branch-flow-ci`) → develop PR → ② Role 스택 배포
->   (`aws cloudformation deploy` — 파일 상단 주석) → ③ develop → Prod 머지로 첫 자동배포 → VocabFn·다이제스트·학습 레슨 동작 확인
+> - ✅ Role 스택 `HariesseGithubDeploy` 배포 완료 (2026-10-14, Mac). trust = `repo:BongjoonKim/hariesse:ref:refs/heads/Prod`만,
+>   IAM 시뮬레이션: cdk 부트스트랩 Role assume = allowed, 그 밖의 Role(nadeliv-frontend-deploy 등) = deny.
+> - 남은 순서: ① 이 브랜치(`chore/branch-flow-ci`) → develop PR → ② (Role 완료) → ③ develop → Prod 머지로 첫 자동배포 → VocabFn·다이제스트·학습 레슨 동작 확인
 >   → ④ 디자인 브랜치를 develop 기준으로 충돌 해결해 PR.
 > - 권장: GitHub에서 Prod 브랜치 보호(PR 필수) — 실수로 Prod에 직접 push해 배포되는 것 방지.
 > - CI의 리전: `bin/app.ts`가 `CDK_DEFAULT_REGION ?? 'ap-northeast-2'`이고 deploy 잡은 `aws-region: ap-northeast-2`를 준다
