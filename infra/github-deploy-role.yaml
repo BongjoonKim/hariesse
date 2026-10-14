@@ -1,0 +1,56 @@
+# GitHub Actions 배포용 IAM Role. CDK 앱 밖에 두는 이유: 배포 Role이 자기 자신을 배포하면
+# 권한을 잘못 건드렸을 때 복구할 수단이 없어진다. 최초 1회(그리고 바꿀 때만) 로컬에서 배포한다:
+#
+#   aws cloudformation deploy --region ap-northeast-2 \
+#     --stack-name HariesseGithubDeploy \
+#     --template-file infra/github-deploy-role.yaml \
+#     --capabilities CAPABILITY_NAMED_IAM
+#
+# GitHub OIDC provider(token.actions.githubusercontent.com)는 계정에 이미 있다 (nadeliv-frontend-deploy와 공유).
+AWSTemplateFormatVersion: '2010-09-09'
+Description: hariesse - GitHub Actions deploy role (Prod branch only)
+
+Parameters:
+  GithubRepo:
+    Type: String
+    Default: BongjoonKim/hariesse
+  DeployBranch:
+    Type: String
+    Default: Prod
+  CdkQualifier:
+    Type: String
+    Default: hnb659fds
+
+Resources:
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: hariesse-github-deploy
+      Description: !Sub 'cdk deploy from ${GithubRepo}@${DeployBranch} via GitHub OIDC'
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # PR·다른 브랜치·포크에서는 assume 불가. Prod push / Prod에서의 수동 실행만.
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GithubRepo}:ref:refs/heads/${DeployBranch}'
+      Policies:
+        - PolicyName: assume-cdk-bootstrap-roles
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # cdk deploy는 부트스트랩 Role(deploy / file-publishing / image-publishing / lookup)을 assume해서 동작한다.
+              # 실제 리소스 생성 권한은 CloudFormation 실행 Role(cdk-*-cfn-exec-role)에 있다.
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub 'arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-*-${AWS::AccountId}-${AWS::Region}'
+
+Outputs:
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn

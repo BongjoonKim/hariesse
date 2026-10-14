@@ -12,6 +12,21 @@
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **다음 증분은 Phase 2 개인화(가중치 학습 슬롯 반영, isNovel 실제 신호) — HANDOFF §7 로드맵 참고.**
 
+## ⚠️ 브랜치 / 배포 규칙 (2026-10-14 결정 — 반드시 지킬 것)
+Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`~/.claude`)·워크트리는 **PC마다 따로라서 공유되지 않는다.**
+두 PC가 공유하는 건 **GitHub 리포뿐**이므로, 작업 결과·결정·배포 상태는 전부 리포(코드 + 이 파일 + HANDOFF.md)에 남긴다.
+
+```
+작업 브랜치 ──PR──▶ develop ──(모아서) PR──▶ Prod ──push──▶ GitHub Actions가 cdk deploy
+```
+- **로컬에서 `cdk deploy` 하지 않는다.** 배포는 Prod 머지로만 (`.github/workflows/deploy.yml`).
+  로컬 배포를 하면 GitHub에 없는 코드가 AWS에 올라가고, 다음 Prod 배포가 그걸 지운다 (10/11 VocabFn 사례).
+- 작업은 `develop`에서 브랜치를 따서 하고, 끝나면 **push + develop으로 PR**. 세션을 끝내기 전에 push 안 된 커밋이 없게 한다.
+- 새 기능을 시작하기 전에 `git fetch` 후 `origin/develop` 기준으로 시작한다 (다른 PC 작업을 먼저 받는다).
+- 결정·배포 기록은 HANDOFF.md에 커밋한다. 로컬 메모리에만 적으면 다른 PC에서는 모른다.
+- 배포 Role: `hariesse-github-deploy` (`infra/github-deploy-role.yaml`, Prod 브랜치에서만 assume 가능). 이 Role만 예외적으로 로컬 `aws cloudformation deploy`.
+- 예외: SSM 값 변경·seed·add-source·Lambda 수동 invoke 같은 **운영 작업**은 지금처럼 세션에서 AWS CLI로 한다 (코드 배포가 아니므로).
+
 ## 현재 상태: Phase 1 + Feedback + 소스 확장
 `Collection → Curation → Delivery → Feedback` 루프가 끝까지 동작.
 - 다이제스트 항목마다 인라인 버튼 `[👍 좋아요][⭐ 사이트 좋아요][💾 nadeliv 글감][⏭ 건너뛰기]`
@@ -103,9 +118,8 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 npm install
 npm test                 # scoring + extract 단위테스트
 npm run build            # tsc --noEmit 타입체크
-npx cdk synth            # 합성
-npx cdk bootstrap        # 최초 1회
-AWS_REGION=ap-northeast-2 npx cdk deploy --all   # 로컬 AWS 설정에 리전이 없으면 us-east-1로 합성됨
+npx cdk synth            # 합성 (PR마다 CI가 위 3개를 돌린다: .github/workflows/ci.yml)
+# 배포 = develop → Prod PR 머지. 로컬 cdk deploy 금지 (위 "브랜치 / 배포 규칙")
 # 배포 후: SSM/Secrets 값 입력 → seed → 상태머신 수동 실행
 SOURCES_TABLE=<out> PROFILE_TABLE=<out> AWS_REGION=ap-northeast-2 npm run seed
 

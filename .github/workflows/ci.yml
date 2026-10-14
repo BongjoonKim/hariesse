@@ -1,0 +1,31 @@
+# PR 검증: develop / Prod로 들어오는 PR과 develop push마다 테스트·타입체크·합성.
+# AWS 자격증명 없이 돈다 (bin/app.ts가 account/region을 직접 지정하고 lookup을 안 쓴다).
+name: CI
+
+on:
+  pull_request:
+    branches: [develop, Prod]
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20 # Lambda 런타임(NODEJS_20_X)과 맞춘다
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      # NodejsFunction 번들(esbuild + nodeModules 설치)까지 여기서 깨지는지 확인
+      - run: npx cdk synth --quiet
+      - run: npm run --if-present synth:design -- --quiet
