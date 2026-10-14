@@ -9,6 +9,8 @@ export const ENV = {
   ARTICLES_TABLE: 'ARTICLES_TABLE',
   PROFILE_TABLE: 'PROFILE_TABLE',
   RAW_BUCKET: 'RAW_BUCKET',
+  /** Feedback Lambda → TOEFL 단어장 Lambda 비동기 호출용 */
+  VOCAB_FUNCTION_NAME: 'VOCAB_FUNCTION_NAME',
 } as const;
 
 // SSM Parameter Store 경로 (비-시크릿 설정값)
@@ -24,6 +26,9 @@ export const SSM = {
   DIGEST_SIZE: '/hariesse/digest-size',
   DIGEST_MIN_SIZE: '/hariesse/digest-min-size',
   DIGEST_MIN_SCORE: '/hariesse/digest-min-score',
+  // TOEFL 단어장
+  VOCAB_NOTION_DATABASE_ID: '/hariesse/vocab-notion-database-id',
+  VOCAB_REVIEW_SIZE: '/hariesse/vocab-review-size',
 } as const;
 
 // Secrets Manager 시크릿 이름 (민감 토큰)
@@ -46,4 +51,7 @@ export const DEFAULTS = {
   DIGEST_MIN_SIZE: 2,
   DIGEST_MIN_SCORE: 70,
   ARTICLE_TTL_DAYS: 30,
+  // TOEFL 단어장: 하루 복습 퀴즈 수 / 복습 실행 1회당 뜻 채우기(Bedrock) 상한
+  VOCAB_REVIEW_SIZE: 10,
+  VOCAB_ENRICH_CAP: 20,
 } as const;

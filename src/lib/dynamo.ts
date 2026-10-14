@@ -274,3 +274,21 @@ export async function getLearningProgress(table: string): Promise<LearningProgre
 export async function putLearningProgress(table: string, progress: LearningProgress): Promise<void> {
   await doc.send(new PutCommand({ TableName: table, Item: progress }));
 }
+
+// ---- TOEFL 단어장 복습 상태 (Profile 테이블의 pk='VOCAB' 아이템) ----
+
+export interface VocabReviewState {
+  pk: 'VOCAB';
+  /** 정기 복습을 마지막으로 보낸 날 (KST YYYY-MM-DD) — 같은 날 중복 발송 방지 */
+  lastReviewDate?: string;
+  updatedAt: string;
+}
+
+export async function getVocabReviewState(table: string): Promise<VocabReviewState | undefined> {
+  const res = await doc.send(new GetCommand({ TableName: table, Key: { pk: 'VOCAB' } }));
+  return res.Item as VocabReviewState | undefined;
+}
+
+export async function putVocabReviewState(table: string, state: VocabReviewState): Promise<void> {
+  await doc.send(new PutCommand({ TableName: table, Item: state }));
+}

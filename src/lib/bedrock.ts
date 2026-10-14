@@ -2,7 +2,7 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
-import type { Curation, LessonContent, SourceType } from './types';
+import type { Curation, LessonContent, SourceType, VocabEnrichment, VocabKind } from './types';
 import { AREA_LABEL } from '../domain/curriculum';
 import type { LessonPlan } from '../domain/learning';
 
@@ -196,4 +196,55 @@ export async function writeLesson(
 ): Promise<LessonContent> {
   const text = await invokeClaude(modelId, region, LESSON_SYSTEM_PROMPT, buildLessonPrompt(plan), 3000);
   return parseLessonContent(text);
+}
+
+// ---------------------------------------------------------------- TOEFL 단어장
+
+const VOCAB_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 사용자가 공부하다 기록한 영어 단어·표현·문장을 받아
+한국어 학습 카드로 정리한다. 사용자는 한국어 화자이고 TOEFL iBT(reading/listening/speaking/writing)를 준비 중이다.
+
+작성 원칙:
+- 뜻·번역·설명은 한국어로. 영어 예문은 TOEFL 지문(학술·캠퍼스 맥락)에 나올 법한 자연스러운 문장으로.
+- 단어/표현이면: meaning = 핵심 뜻 1~3개(쉼표로 구분), pos = 품사, pronunciation = IPA, synonyms = TOEFL 수준 동의어(패러프레이즈용) 2~4개,
+  note = 자주 같이 쓰는 표현(콜로케이션)이나 헷갈리기 쉬운 점 1~2문장.
+- 문장이면: meaning = 자연스러운 한국어 번역, pos·pronunciation·example은 빈 문자열, synonyms = [],
+  note = 문장 속 핵심 단어·표현 2~4개를 "표현: 뜻" 형식으로 한 줄씩.
+- 철자가 틀린 것 같으면 note 맨 앞에 "철자 확인: <올바른 철자>"를 써라.
+- 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
+{"meaning": "<뜻 또는 번역>", "pos": "<noun|verb|adjective|adverb|phrase|idiom|...>", "pronunciation": "<IPA>",
+ "example": "<영어 예문>", "exampleKo": "<예문 번역>", "synonyms": ["<동의어>", ...], "note": "<팁 또는 핵심 표현>"}`;
+
+export function buildVocabPrompt(text: string, kind: VocabKind, userMeaning?: string): string {
+  return `종류: ${kind === 'word' ? '단어/표현' : '문장'}
+입력: ${text}${userMeaning ? `
+사용자가 적은 뜻(이 뜻을 기준으로 정리하라): ${userMeaning}` : ''}
+
+JSON으로만 답하라.`;
+}
+
+/** Bedrock 응답 → VocabEnrichment. 뜻이 비면 throw. 순수함수. */
+export function parseVocabEnrichment(text: string): VocabEnrichment {
+  const p = parseJsonObject(text);
+  const result: VocabEnrichment = {
+    meaning: str(p.meaning),
+    pos: str(p.pos) || undefined,
+    pronunciation: str(p.pronunciation) || undefined,
+    example: str(p.example) || undefined,
+    exampleKo: str(p.exampleKo) || undefined,
+    synonyms: Array.isArray(p.synonyms) ? p.synonyms.map(str).filter(Boolean).slice(0, 6) : [],
+    note: str(p.note) || undefined,
+  };
+  if (!result.meaning) throw new Error(`단어 응답에 뜻 없음: ${text.slice(0, 200)}`);
+  return result;
+}
+
+export async function enrichVocab(
+  modelId: string,
+  region: string,
+  text: string,
+  kind: VocabKind,
+  userMeaning?: string
+): Promise<VocabEnrichment> {
+  const raw = await invokeClaude(modelId, region, VOCAB_SYSTEM_PROMPT, buildVocabPrompt(text, kind, userMeaning), 800);
+  return parseVocabEnrichment(raw);
 }

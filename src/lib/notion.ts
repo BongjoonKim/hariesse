@@ -3,7 +3,7 @@ import type { LessonPlan } from '../domain/learning';
 import type { Article, Category, SourceType, ArticleStatus, LessonContent } from './types';
 
 const NOTION_VERSION = '2022-06-28';
-const BASE = 'https://api.notion.com/v1';
+export const BASE = 'https://api.notion.com/v1';
 
 const CATEGORY_LABEL: Record<Category, string> = {
   travel: '여행',
@@ -25,7 +25,7 @@ const STATUS_LABEL: Record<ArticleStatus, string> = {
   skipped: '스킵',
 };
 
-function headers(token: string): Record<string, string> {
+export function headers(token: string): Record<string, string> {
   return {
     Authorization: `Bearer ${token}`,
     'Notion-Version': NOTION_VERSION,

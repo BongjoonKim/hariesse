@@ -27,7 +27,13 @@ export interface AppConfig {
   digestSize: number;
   digestMinSize: number;
   digestMinScore: number;
+  /** TOEFL 단어장 Notion DB. 비어 있으면 단어장 기능 꺼짐. */
+  vocabNotionDatabaseId: string;
+  vocabReviewSize: number;
 }
+
+/** SSM GetParameters 1회 호출당 이름 개수 상한 (AWS API 제약). */
+const SSM_GET_PARAMETERS_MAX = 10;
 
 let cachedConfig: AppConfig | undefined;
 const secretCache = new Map<string, string>();
@@ -57,12 +63,17 @@ export async function getConfig(): Promise<AppConfig> {
     SSM.DIGEST_SIZE,
     SSM.DIGEST_MIN_SIZE,
     SSM.DIGEST_MIN_SCORE,
+    SSM.VOCAB_NOTION_DATABASE_ID,
+    SSM.VOCAB_REVIEW_SIZE,
   ];
 
-  const res = await ssm.send(new GetParametersCommand({ Names: names }));
+  // GetParameters는 한 번에 최대 10개 — 넘으면 ValidationException. 10개씩 나눠 조회한다.
   const p: Record<string, string> = {};
-  for (const param of res.Parameters ?? []) {
-    if (param.Name && param.Value !== undefined) p[param.Name] = param.Value;
+  for (let i = 0; i < names.length; i += SSM_GET_PARAMETERS_MAX) {
+    const res = await ssm.send(new GetParametersCommand({ Names: names.slice(i, i + SSM_GET_PARAMETERS_MAX) }));
+    for (const param of res.Parameters ?? []) {
+      if (param.Name && param.Value !== undefined) p[param.Name] = param.Value;
+    }
   }
 
   cachedConfig = {
@@ -80,6 +91,8 @@ export async function getConfig(): Promise<AppConfig> {
     digestSize: num(p[SSM.DIGEST_SIZE], DEFAULTS.DIGEST_SIZE),
     digestMinSize: num(p[SSM.DIGEST_MIN_SIZE], DEFAULTS.DIGEST_MIN_SIZE),
     digestMinScore: num(p[SSM.DIGEST_MIN_SCORE], DEFAULTS.DIGEST_MIN_SCORE),
+    vocabNotionDatabaseId: p[SSM.VOCAB_NOTION_DATABASE_ID] ?? '',
+    vocabReviewSize: num(p[SSM.VOCAB_REVIEW_SIZE], DEFAULTS.VOCAB_REVIEW_SIZE),
   };
   return cachedConfig;
 }

@@ -8,6 +8,7 @@
 > **요약: 2026-07-20 배포 + E2E 검증 완료. Feedback 증분(Telegram 버튼 + ApiStack)도 배포·검증 완료.**
 > **2026-09-06 소스 확장 증분: YouTube + Reddit 수집 어댑터 — 배포 완료, 매일 수집 중 (2026-10-04 확인).**
 > **2026-09-30 학습 트랙 증분: 매일 20:00 KST 기술 레슨 1건(Telegram + Notion 학습노트) — 2026-10-04 배포·E2E 검증 완료.**
+> **2026-10-11 TOEFL 단어장 증분: Telegram/Notion에 적으면 뜻 채우고 매일 21:00 KST 간격 반복 복습 — 2026-10-11 배포 (HANDOFF 맨 위 블록).**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **다음 증분은 Phase 2 개인화(가중치 학습 슬롯 반영, isNovel 실제 신호) — HANDOFF §7 로드맵 참고.**
 
@@ -20,6 +21,9 @@
   Kubernetes → Jenkins → Node.js → Langflow → React 순으로 트랙을 돌고, 트랙 안에서는 1강부터 순서대로.
   버튼 `[✅ 이해했어요][🔁 쉽게 다시]` — 쉽게 다시 = 다음 회차에 진도를 멈추고 그 레슨을 쉬운 버전으로 재발송.
   전 과정(45레슨)을 다 돌면 같은 목차를 심화 모드로 다시 돈다.
+- **TOEFL 단어장**: 봇에 영어 단어·표현·문장을 보내거나 Notion "TOEFL Vocab" DB에 `표현`만 적으면
+  Bedrock이 빈 칸(뜻/번역·품사·예문·동의어·TOEFL 팁)을 채운다. 매일 21:00 KST에 복습 퀴즈(뜻은 스포일러)
+  `[✅ 알아요][❌ 몰라요]` → Leitner 박스(1·3·7·14·30일). **원본 저장소는 Notion DB** (DynamoDB에 따로 두지 않음).
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 
@@ -27,7 +31,9 @@
 - **DataStack**: DynamoDB `Sources`/`Articles`/`Profile` + S3(raw 본문).
 - **PipelineStack**: Lambda 3개(collect/curate/deliver) + Step Functions(순차) + EventBridge(매일 07:00 KST = 22:00 UTC).
   + LearnFn(학습 레슨) + 별도 EventBridge(매일 20:00 KST = 11:00 UTC). SFN 밖에서 독립 실행.
+  + VocabFn(TOEFL 단어장: capture/review) + EventBridge(매일 21:00 KST = 12:00 UTC).
 - **ApiStack**: Feedback Lambda + Function URL(Telegram webhook, secret_token 헤더 인증).
+  버튼(callback_query) + 메시지(message → VocabFn 비동기 호출). VocabFn은 PipelineStack에 있고 cross-stack으로 넘긴다.
 - **LLM**: Amazon Bedrock(Claude), 서울 리전 ap-northeast-2. 모델 ID는 SSM 분리, 교차리전 추론 프로파일(`apac.*`).
 
 ## 데이터 흐름
@@ -56,7 +62,9 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - `src/domain/feedback.ts` — callback_data 인코딩/디코딩 + 액션별 효과(순수함수, 테스트 대상).
 - `src/domain/curriculum.ts` — 학습 트랙 목차(트랙·레슨·핵심 포인트·공식 문서 링크). **데이터만.**
 - `src/domain/learning.ts` — 진도 계산/레슨 버튼/관련 글 선택(순수함수, 테스트 대상).
-- `src/handlers/{collect,curate,deliver,feedback,learn}/index.ts` — Lambda 핸들러.
+- `src/domain/vocab.ts` — 단어장 입력 파싱/정규화 키/Leitner 복습/callback(순수함수, 테스트 대상).
+- `src/lib/notion-vocab.ts` — "TOEFL Vocab" DB 속성 매핑(`VOCAB_PROP`) + 조회/생성/갱신. 속성 이름 = 스키마.
+- `src/handlers/{collect,curate,deliver,feedback,learn,vocab}/index.ts` — Lambda 핸들러.
 
 ## 코딩 규칙 / 가드레일
 - **dedup·idempotency**: articleId = `hashUrl(url)`. collect는 `putArticleIfNew`(조건부 put), Notion은 URL 기준 upsert.
@@ -73,15 +81,22 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
   레슨 추가는 트랙 끝에. 참고 링크는 LLM이 만들지 않고 `curriculum.ts`의 공식 문서만 쓴다(지어낸 URL 방지).
 - **학습 진도 저장 위치**: Profile 테이블의 `pk='LEARNING'` 아이템. 같은 KST 날짜엔 1번만 발송(`lastSentDate`).
   수동 테스트: `aws lambda invoke --function-name <LearnFunctionName> --payload '{"force":true}' ...`
-- **callback_data prefix**: `v1|` = 다이제스트 피드백, `l1|` = 학습 레슨 버튼.
+- **callback_data prefix**: `v1|` = 다이제스트 피드백, `l1|` = 학습 레슨 버튼, `t1|` = TOEFL 단어장(k 알아요 / f 몰라요 / x 삭제 + Notion page id 32자).
+- **단어장 메시지는 내 채팅만**: 봇엔 누구나 말을 걸 수 있다. Feedback은 SSM `telegram-chat-id`와 다른 채팅의 message를 버린다.
+  webhook `allowed_updates`에 `message`가 있어야 메시지가 온다.
+- **단어장 enrich는 빈 칸만 채운다**: 사용자가 Notion에 적은 뜻·예문을 Bedrock 결과로 덮지 말 것 (`fillFromEnrichment`).
+- **VocabFn 비동기 재시도 0회**: capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다.
+- **SSM GetParameters는 1회 10개까지**: `getConfig()`가 10개씩 나눠 조회한다. SSM 이름을 늘려도 그대로 둘 것.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.
 
 ## 설정값 위치
 - SSM `/hariesse/*`: bedrock-model-id, bedrock-region, exploration-ratio, notion-database-id,
-  telegram-chat-id, daily-bedrock-cap, daily-curate-cap, digest-size, digest-min-size, digest-min-score.
+  telegram-chat-id, daily-bedrock-cap, daily-curate-cap, digest-size, digest-min-size, digest-min-score,
+  vocab-notion-database-id(비면 단어장 꺼짐), vocab-review-size(기본 10).
 - 다이제스트 건수: 점수 ≥ `digest-min-score`(기본 70)인 글 수를 [`digest-min-size`(2), `digest-size`(4)]로 클램프.
 - Secrets `hariesse/telegram-bot-token`, `hariesse/notion-token`.
-- Notion DB ID (생성됨): `a22cbf53637840dc867d6cd8e7b2614e` (My secretary 페이지 하위, DB명 "hariesse Archive").
+- Notion DB ID (생성됨): `a22cbf53637840dc867d6cd8e7b2614e` (봉준 개발목록(구 My secretary) 페이지 하위, DB명 "hariesse Archive").
+- TOEFL 단어장 Notion DB: `5582e65c809b45e1b420325db9fc9adb` (같은 페이지 하위, DB명 "TOEFL Vocab").
 
 ## 배포 / 검증
 ```
@@ -90,7 +105,7 @@ npm test                 # scoring + extract 단위테스트
 npm run build            # tsc --noEmit 타입체크
 npx cdk synth            # 합성
 npx cdk bootstrap        # 최초 1회
-npx cdk deploy --all
+AWS_REGION=ap-northeast-2 npx cdk deploy --all   # 로컬 AWS 설정에 리전이 없으면 us-east-1로 합성됨
 # 배포 후: SSM/Secrets 값 입력 → seed → 상태머신 수동 실행
 SOURCES_TABLE=<out> PROFILE_TABLE=<out> AWS_REGION=ap-northeast-2 npm run seed
 
