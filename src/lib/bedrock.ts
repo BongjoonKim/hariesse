@@ -212,10 +212,14 @@ const VOCAB_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 사용�
   note = 자주 같이 쓰는 표현(콜로케이션)이나 헷갈리기 쉬운 점 1~2문장.
 - 문장이면: meaning = 자연스러운 한국어 번역, pos·pronunciation·example은 빈 문자열, synonyms = [],
   note = 문장 속 핵심 단어·표현 2~4개를 "표현: 뜻" 형식으로 한 줄씩.
-- 철자가 틀린 것 같으면 note 맨 앞에 "철자 확인: <올바른 철자>"를 써라.
+- 오타 확인: 입력은 사용자가 급하게 친 것이라 오타가 있을 수 있다(예: "locla" → "local", "teh" → "the").
+  corrected = 입력에서 철자가 틀린 단어만 고친 문자열. 고칠 게 없으면 입력을 한 글자도 바꾸지 말고 그대로.
+  문법·어순·단어 선택·문장부호·대소문자는 고치지 마라(문장을 다시 쓰지 마라). 고유명사·전문용어는 오타가 확실할 때만.
+  meaning·example·note 등 나머지는 모두 고친 입력(corrected) 기준으로 써라.
 - 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
-{"meaning": "<뜻 또는 번역>", "pos": "<noun|verb|adjective|adverb|phrase|idiom|...>", "pronunciation": "<IPA>",
- "example": "<영어 예문>", "exampleKo": "<예문 번역>", "synonyms": ["<동의어>", ...], "note": "<팁 또는 핵심 표현>"}`;
+{"corrected": "<철자만 고친 입력>", "meaning": "<뜻 또는 번역>", "pos": "<noun|verb|adjective|adverb|phrase|idiom|...>",
+ "pronunciation": "<IPA>", "example": "<영어 예문>", "exampleKo": "<예문 번역>", "synonyms": ["<동의어>", ...],
+ "note": "<팁 또는 핵심 표현>"}`;
 
 export function buildVocabPrompt(text: string, kind: VocabKind, userMeaning?: string): string {
   return `종류: ${kind === 'word' ? '단어/표현' : '문장'}
@@ -236,6 +240,7 @@ export function parseVocabEnrichment(text: string): VocabEnrichment {
     exampleKo: str(p.exampleKo) || undefined,
     synonyms: Array.isArray(p.synonyms) ? p.synonyms.map(str).filter(Boolean).slice(0, 6) : [],
     note: str(p.note) || undefined,
+    corrected: str(p.corrected) || undefined,
   };
   if (!result.meaning) throw new Error(`단어 응답에 뜻 없음: ${text.slice(0, 200)}`);
   return result;

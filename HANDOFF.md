@@ -52,6 +52,13 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
+> 🛠 **2026-10-16 단어장 입력 정리 (PR → develop, Prod 미반영 = 아직 배포 안 됨).**
+> - 오타 수정: "…for locla non-profits"가 그대로 저장된 사례. Bedrock 응답에 `corrected`를 추가하고, `applyTypoFix`가
+>   단어별 편집 거리로 철자 수정만 반영 → 고친 표현으로 Notion 저장·dedup. Telegram 카드에 `✏️ 오타 고침: locla → local`.
+> - 영어+한국어 메모 한 줄("…proactive가 모두 … 고마워요 라는 뜻"): 메모까지 `표현`에 들어가 복습 문제에 정답이 보였음.
+>   `splitKoreanMemo`로 영어만 `표현`, 한국어는 `메모` 끝에 `🙋 내 느낀점: …` (정답 보기 안). Bedrock 정답 내용은 그대로 둠(사용자 요청).
+> - 이미 저장된 행(locla, proactive·case studies 문장 2건)은 코드가 고치지 않는다 — Notion에서 따로 정리.
+
 > 🆕 **2026-10-11 TOEFL 단어장 증분 — 2026-10-11 배포 완료** (브랜치 `claude/toefl-vocab-tracking-971d54` → `develop` d12e86b, Prod 미반영).
 > 목적: TOEFL 공부 중 만난 단어·표현·문장을 Telegram이나 Notion에 적어 두면 뜻을 채워 주고, 간격 반복으로 복습시킨다.
 > - **원본 저장소 = Notion DB "TOEFL Vocab"** (`5582e65c809b45e1b420325db9fc9adb`, 부모 페이지 `38de549e…` = hariesse Archive와 같은 위치. 그 페이지 이름이 "My secretary" → "봉준 개발목록"으로 바뀜).

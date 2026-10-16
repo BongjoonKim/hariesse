@@ -102,6 +102,8 @@ export interface VocabEnrichment {
   synonyms: string[];
   /** TOEFL 팁(콜로케이션·자주 나오는 맥락) / 문장이면 핵심 표현 정리 */
   note?: string;
+  /** 입력에서 철자(오타)만 고친 것. 고칠 게 없으면 입력 그대로. 실제 반영 여부는 domain/vocab의 applyTypoFix가 정한다. */
+  corrected?: string;
 }
 
 /** Notion "TOEFL Vocab" DB 한 행. Notion이 원본 저장소다. */

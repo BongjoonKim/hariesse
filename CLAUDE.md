@@ -115,6 +115,10 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - **단어장 메시지는 내 채팅만**: 봇엔 누구나 말을 걸 수 있다. Feedback은 SSM `telegram-chat-id`와 다른 채팅의 message를 버린다.
   webhook `allowed_updates`에 `message`가 있어야 메시지가 온다.
 - **단어장 enrich는 빈 칸만 채운다**: 사용자가 Notion에 적은 뜻·예문을 Bedrock 결과로 덮지 말 것 (`fillFromEnrichment`).
+- **단어장 오타 수정은 철자만**: Bedrock이 `corrected`(철자만 고친 입력)를 주고, `applyTypoFix`가 단어별 편집 거리로
+  오타로 볼 수 있는 변경만 반영한다(문법·단어 교체·재작성은 버림). 저장·dedup 키는 고친 표현 기준, 카드에 `✏️ 오타 고침` 표시.
+- **영어 + 한국어 메모 한 줄**: `splitKoreanMemo`가 첫 한글 앞까지만 `표현`으로 저장하고, 한국어는 `메모` 칸 끝에
+  `🙋 내 느낀점: …`으로 붙인다(정답 보기 안). 메모는 Bedrock에 넘기지 않는다 — 정답 내용은 그대로 유지.
 - **VocabFn 비동기 재시도 0회**: capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다.
 - **SSM GetParameters는 1회 10개까지**: `getConfig()`가 10개씩 나눠 조회한다. SSM 이름을 늘려도 그대로 둘 것.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.

@@ -26,12 +26,16 @@ import {
   normalizeVocabKey,
   detectKind,
   fillFromEnrichment,
+  applyTypoFix,
+  splitKoreanMemo,
+  withUserMemo,
   initialReview,
   applyRepeatCapture,
   pickDueEntries,
   needsEnrichment,
   BOX_INTERVAL_DAYS,
   type EnrichedFields,
+  type TypoFix,
 } from '../../domain/vocab';
 import { DEFAULTS } from '../../lib/constants';
 import type { VocabEntry, VocabKind } from '../../lib/types';
@@ -81,40 +85,55 @@ async function capture(cfg: AppConfig, text: string, messageId?: number): Promis
   const today = kstDate();
 
   for (const input of parseVocabMessage(text)) {
+    /** 이미 있는 표현 = 또 헷갈림. 헷갈린 횟수 +1 하고 기존 카드로 답장. */
+    const repeat = async (existing: VocabEntry, fixes?: string[]) => {
+      const fields = {
+        ...applyRepeatCapture(existing, today),
+        tags: [...new Set([...existing.tags, ...input.tags])],
+      };
+      await updateVocabPage(notionToken, existing.pageId, fields);
+      const card = formatVocabCard({ ...existing, ...fields }, { repeated: true, fixes });
+      await sendReply(botToken, cfg.telegramChatId, card, messageId, buildVocabSavedKeyboard(existing.pageId));
+      result.repeated!++;
+    };
+
     try {
       const key = normalizeVocabKey(input.text);
       const existing = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, key);
-
       if (existing) {
-        const fields = {
-          ...applyRepeatCapture(existing, today),
-          tags: [...new Set([...existing.tags, ...input.tags])],
-        };
-        await updateVocabPage(notionToken, existing.pageId, fields);
-        const card = formatVocabCard({ ...existing, ...fields }, { repeated: true });
-        await sendReply(botToken, cfg.telegramChatId, card, messageId, buildVocabSavedKeyboard(existing.pageId));
-        result.repeated!++;
+        await repeat(existing);
         continue;
       }
 
-      const enriched = await tryEnrich(cfg, input.text, input.kind, { meaning: input.meaning });
+      // 오타는 Bedrock이 뜻을 채우면서 같이 고친다 → 고친 표현으로 저장·dedup
+      const enriched = await tryEnrich(cfg, input.text, input.kind, { meaning: input.meaning }, input.memo);
+      const savedText = enriched?.text ?? input.text;
+      const savedKey = normalizeVocabKey(savedText);
+      if (savedKey !== key) {
+        const existingFixed = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, savedKey);
+        if (existingFixed) {
+          await repeat(existingFixed, enriched?.fixes);
+          continue;
+        }
+      }
+
       const fields: VocabFields = {
-        text: input.text,
-        key,
+        text: savedText,
+        key: savedKey,
         kind: input.kind,
         tags: input.tags,
         origin: 'telegram',
-        ...(enriched ?? { meaning: input.meaning }),
+        ...(enriched?.fields ?? { meaning: input.meaning, note: withUserMemo(undefined, input.memo) }),
         ...initialReview(today),
         // 뜻 채우기에 실패하면 '새로 추가'로 두고 다음 복습 실행 때 다시 채운다
         status: enriched ? 'learning' : 'new',
       };
       const pageId = await createVocabPage(notionToken, cfg.vocabNotionDatabaseId, fields);
-      const entry: VocabEntry = { pageId, tags: [], box: 0, missCount: 0, text: input.text, ...fields };
+      const entry: VocabEntry = { pageId, tags: [], box: 0, missCount: 0, text: savedText, ...fields };
       await sendReply(
         botToken,
         cfg.telegramChatId,
-        formatVocabCard(entry, { repeated: false }),
+        formatVocabCard(entry, { repeated: false, fixes: enriched?.fixes }),
         messageId,
         buildVocabSavedKeyboard(pageId)
       );
@@ -134,16 +153,25 @@ async function capture(cfg: AppConfig, text: string, messageId?: number): Promis
   return result;
 }
 
-/** Bedrock으로 빈 칸 채우기. 실패해도 저장은 계속하도록 undefined. */
+/**
+ * Bedrock으로 빈 칸 채우기 + 오타 수정. text = 저장할 표현(오타 고친 것), fixes = 고친 내역.
+ * memo(영어 뒤에 붙여 쓴 한국어 메모)는 Bedrock에 넘기지 않고 메모 칸 끝에 '내 느낀점'으로 붙인다.
+ * 실패해도 저장은 계속하도록 undefined (그땐 원래 입력 그대로 저장).
+ */
 async function tryEnrich(
   cfg: AppConfig,
   text: string,
   kind: VocabKind,
-  current: EnrichedFields
-): Promise<EnrichedFields | undefined> {
+  current: EnrichedFields,
+  memo?: string
+): Promise<({ fields: EnrichedFields } & TypoFix) | undefined> {
   try {
     const e = await enrichVocab(cfg.bedrockModelId, cfg.bedrockRegion, text, kind, current.meaning);
-    return fillFromEnrichment(current, e);
+    const fix = applyTypoFix(text, e.corrected);
+    if (fix.fixes.length) console.log(`vocab 오타 수정 "${text}": ${fix.fixes.join(', ')}`);
+    else if (e.corrected && e.corrected !== text.trim()) console.log(`vocab 오타 수정 거부(재작성으로 판단) "${text}" → "${e.corrected}"`);
+    const fields = fillFromEnrichment(current, e);
+    return { fields: { ...fields, note: withUserMemo(fields.note, memo) }, ...fix };
   } catch (err) {
     console.warn(`vocab enrich 실패 "${text}": ${(err as Error).message}`);
     return undefined;
@@ -213,12 +241,16 @@ async function enrichPending(cfg: AppConfig, notionToken: string, today: string)
   let done = 0;
   for (const entry of pending) {
     if (!needsEnrichment(entry)) continue;
-    const kind = entry.kind ?? detectKind(entry.text);
-    const filled = await tryEnrich(cfg, entry.text, kind, entry);
+    // Notion에 직접 적은 표현도 한국어 메모를 떼고 오타를 고쳐서 저장 (키도 바뀐 표현 기준)
+    const { text, memo } = splitKoreanMemo(entry.text);
+    const kind = entry.kind ?? detectKind(text);
+    const filled = await tryEnrich(cfg, text, kind, entry, memo);
     if (!filled) continue;
+    const changed = filled.text !== entry.text;
     const fields: VocabFields = {
-      ...filled,
-      key: entry.key ?? normalizeVocabKey(entry.text),
+      ...filled.fields,
+      ...(changed ? { text: filled.text } : {}),
+      key: changed ? normalizeVocabKey(filled.text) : entry.key ?? normalizeVocabKey(entry.text),
       kind,
       origin: entry.origin ?? 'notion',
       status: 'learning',

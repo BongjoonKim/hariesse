@@ -6,6 +6,10 @@ import {
   detectKind,
   parseVocabMessage,
   fillFromEnrichment,
+  applyTypoFix,
+  editDistance,
+  splitKoreanMemo,
+  withUserMemo,
   initialReview,
   applyReview,
   applyRepeatCapture,
@@ -74,6 +78,44 @@ describe('입력 파싱', () => {
     expect(parseVocabMessage(':: 뜻만')).toEqual([]);
   });
 
+  it('영어 뒤에 붙여 쓴 한국어 메모는 표현에서 떼어낸다', () => {
+    expect(splitKoreanMemo('Thank you all for being so proactive가 모두 매우 선제적으로 움직여줘서 고마워요 라는 뜻')).toEqual({
+      text: 'Thank you all for being so proactive',
+      memo: '모두 매우 선제적으로 움직여줘서 고마워요 라는 뜻',
+    });
+    expect(
+      splitKoreanMemo(
+        "I'll finish preparing the Interactive Data Storytelling case studies and share them with everyone by Monday morning에서 case studies가 사례 연구래"
+      )
+    ).toEqual({
+      text: "I'll finish preparing the Interactive Data Storytelling case studies and share them with everyone by Monday morning",
+      memo: 'case studies가 사례 연구래',
+    });
+    // 조사 뒤에 공백이 없으면 메모의 일부로 본다 ("이해" 의 "이"를 떼면 안 됨)
+    expect(splitKoreanMemo('ubiquitous 이해했다').memo).toBe('이해했다');
+  });
+
+  it('영어만 있거나 한국어로 시작하면 그대로', () => {
+    expect(splitKoreanMemo('The findings corroborate the hypothesis.')).toEqual({
+      text: 'The findings corroborate the hypothesis.',
+    });
+    expect(splitKoreanMemo('선제적인 = proactive')).toEqual({ text: '선제적인 = proactive' });
+  });
+
+  it('메시지 파싱: 메모를 떼고 종류는 영어 부분으로 판별', () => {
+    expect(parseVocabMessage('case studies가 사례 연구래 #work')).toEqual([
+      { text: 'case studies', memo: '사례 연구래', meaning: undefined, tags: ['work'], kind: 'word' },
+    ]);
+    expect(parseVocabMessage('mitigate :: 완화하다')[0]).toMatchObject({ text: 'mitigate', meaning: '완화하다', memo: undefined });
+  });
+
+  it('메모는 메모 칸 끝에 "내 느낀점"으로 붙이고 중복으로 붙이지 않는다', () => {
+    expect(withUserMemo('case studies: 사례 연구', '사례 연구래')).toBe('case studies: 사례 연구\n🙋 내 느낀점: 사례 연구래');
+    expect(withUserMemo(undefined, '사례 연구래')).toBe('🙋 내 느낀점: 사례 연구래');
+    expect(withUserMemo('팁', undefined)).toBe('팁');
+    expect(withUserMemo('팁\n🙋 내 느낀점: 메모', '메모')).toBe('팁\n🙋 내 느낀점: 메모');
+  });
+
   it('한 메시지 최대 건수 제한', () => {
     const many = Array.from({ length: 15 }, (_, i) => `word${i}`).join('\n');
     expect(parseVocabMessage(many)).toHaveLength(MAX_INPUTS_PER_MESSAGE);
@@ -111,6 +153,57 @@ describe('fillFromEnrichment', () => {
 
   it('공백뿐인 칸은 빈 칸으로 본다', () => {
     expect(fillFromEnrichment({ meaning: '  ' }, e).meaning).toBe('어디에나 있는');
+  });
+});
+
+describe('오타 수정', () => {
+  const SENTENCE =
+    "However few realize that the company's very first project was a pro-bono initiative - developing a secure data management platform for locla non-profits";
+
+  it('편집 거리: 인접 글자 뒤바꿈은 1', () => {
+    expect(editDistance('locla', 'local')).toBe(1);
+    expect(editDistance('teh', 'the')).toBe(1);
+    expect(editDistance('recieve', 'receive')).toBe(1);
+    expect(editDistance('big', 'large')).toBe(4);
+    expect(editDistance('', 'abc')).toBe(3);
+  });
+
+  it('문장 속 오타 단어만 고친다 (locla → local)', () => {
+    const fix = applyTypoFix(SENTENCE, SENTENCE.replace('locla', 'local'));
+    expect(fix.text).toBe(SENTENCE.replace('locla', 'local'));
+    expect(fix.fixes).toEqual(['locla → local']);
+  });
+
+  it('여러 오타를 각각 기록', () => {
+    expect(applyTypoFix('teh goverment', 'the government')).toEqual({
+      text: 'the government',
+      fixes: ['teh → the', 'goverment → government'],
+    });
+  });
+
+  it('고칠 게 없거나 응답이 비면 원래 입력 그대로', () => {
+    expect(applyTypoFix('ubiquitous', 'ubiquitous')).toEqual({ text: 'ubiquitous', fixes: [] });
+    expect(applyTypoFix('ubiquitous', undefined)).toEqual({ text: 'ubiquitous', fixes: [] });
+    expect(applyTypoFix('ubiquitous', '  ')).toEqual({ text: 'ubiquitous', fixes: [] });
+  });
+
+  it('단어 바꾸기·문법 수정은 오타가 아니므로 반영하지 않는다', () => {
+    expect(applyTypoFix('a big house', 'a large house').fixes).toEqual([]);
+    expect(applyTypoFix('He go to school', 'He goes to school').fixes).toEqual([]);
+    // 오타는 고치고 문법 수정만 버린다
+    expect(applyTypoFix('He go to scohol', 'He goes to school')).toEqual({
+      text: 'He go to school',
+      fixes: ['scohol → school'],
+    });
+  });
+
+  it('띄어쓰기 오타는 받고, 단어를 덧붙인 재작성은 버린다', () => {
+    expect(applyTypoFix('I like it alot', 'I like it a lot')).toEqual({
+      text: 'I like it a lot',
+      fixes: ['alot → a lot'],
+    });
+    expect(applyTypoFix('a big house', 'a very big house').fixes).toEqual([]);
+    expect(applyTypoFix('one two', 'one two three four').fixes).toEqual([]);
   });
 });
 
@@ -280,6 +373,13 @@ describe('Telegram 포맷', () => {
     expect(formatVocabCard(entry({ meaning: undefined }), { repeated: false })).toContain('뜻을 아직 못 채웠어요');
   });
 
+  it('오타를 고쳤으면 카드에 고친 내역을 보여준다', () => {
+    const card = formatVocabCard(entry({ text: 'for local non-profits' }), { repeated: false, fixes: ['locla → local'] });
+    expect(card).toContain('<b>for local non-profits</b>');
+    expect(card).toContain('✏️ 오타 고침: locla → local');
+    expect(formatVocabCard(entry(), { repeated: false, fixes: [] })).not.toContain('오타');
+  });
+
   it('복습 퀴즈: 뜻은 스포일러 안에만', () => {
     const msg = formatReviewItem(entry({ meaning: '어디에나 있는', box: 2, missCount: 1 }), 0, 3);
     expect(msg).toContain('1/3 · 📦 박스 2 · ❗헷갈림 1회');
@@ -302,6 +402,11 @@ describe('Bedrock 단어 응답', () => {
       synonyms: [],
       note: 'corroborate: 뒷받침하다',
     });
+  });
+
+  it('corrected(오타 고친 입력)를 읽는다', () => {
+    expect(parseVocabEnrichment('{"meaning":"지역의","corrected":" local "}').corrected).toBe('local');
+    expect(parseVocabEnrichment('{"meaning":"지역의"}').corrected).toBeUndefined();
   });
 
   it('뜻이 없으면 throw', () => {

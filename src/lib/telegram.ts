@@ -278,14 +278,15 @@ function vocabDetailLines(entry: VocabEntry): string[] {
   return lines;
 }
 
-/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄. 순수함수. */
-export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean }): string {
+/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄, fixes = 저장 전에 고친 오타. 순수함수. */
+export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean; fixes?: string[] }): string {
   const kind = entry.kind ? KIND_LABEL[entry.kind] : '표현';
   const lines = [
     opts.repeated
       ? `📌 <b>이미 있는 ${kind}예요</b> · 헷갈린 횟수 ${entry.missCount}`
       : `📝 <b>저장했어요</b> · ${kind}`,
     vocabHeadline(entry),
+    ...(opts.fixes?.length ? [`✏️ 오타 고침: ${escapeHtml(clip(opts.fixes.join(', '), 300))}`] : []),
     ...vocabDetailLines(entry),
   ];
   if (!entry.meaning) lines.push('⚠️ 뜻을 아직 못 채웠어요. 다음 복습 때 다시 채울게요.');
