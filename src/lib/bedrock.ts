@@ -19,6 +19,8 @@ export interface CurateInput {
   bodyText: string;
   interests: Record<string, number>;
   sourceType?: SourceType;
+  /** 사용자 소개(SSM user-persona). 있으면 평가 기준의 맥락으로 넣는다. */
+  persona?: string;
 }
 
 /** 소스 종류별 평가 맥락 — 본문의 성격이 달라서 그냥 두면 점수가 왜곡된다. */
@@ -41,7 +43,8 @@ function buildUserPrompt(input: CurateInput): string {
     .join(', ');
   const body = input.bodyText.slice(0, 6000);
   const hint = input.sourceType ? SOURCE_HINT[input.sourceType] : undefined;
-  return `사용자 관심사(가중치): ${interests || '없음'}
+  const persona = input.persona?.trim();
+  return `${persona ? `사용자 소개: ${persona}\n` : ''}사용자 관심사(가중치): ${interests || '없음'}
 카테고리: ${input.category}${hint ? `\n소스 특성: ${hint}` : ''}
 제목: ${input.title}
 URL: ${input.url}
