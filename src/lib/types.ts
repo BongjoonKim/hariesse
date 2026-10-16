@@ -1,4 +1,4 @@
-export type Category = 'travel' | 'dev-ai' | 'cloud';
+export type Category = 'travel' | 'dev-ai' | 'cloud' | 'design';
 export type SourceType = 'blog' | 'youtube' | 'hackernews' | 'arxiv' | 'reddit';
 export type ArticleStatus = 'unread' | 'reading' | 'read' | 'starred' | 'skipped';
 export type Slot = 'exploit' | 'explore';

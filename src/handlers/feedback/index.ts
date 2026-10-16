@@ -205,6 +205,11 @@ async function invokeVocab(payload: VocabEvent): Promise<void> {
 }
 
 async function handleMessage(msg: NonNullable<TelegramUpdate['message']>): Promise<void> {
+  // 단어장을 끈 배포(-c vocab=false, 예: 디자인 stage)는 메시지를 받을 일이 없다
+  if (!process.env[ENV.VOCAB_FUNCTION_NAME]) {
+    console.warn('message 무시: 단어장 꺼짐');
+    return;
+  }
   const cfg = await getConfig();
   // 봇은 누구나 말을 걸 수 있다 — 내 채팅이 아니면 조용히 무시
   if (!cfg.telegramChatId || String(msg.chat.id) !== cfg.telegramChatId || msg.from?.is_bot) {

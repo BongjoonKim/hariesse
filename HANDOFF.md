@@ -95,9 +95,30 @@
 >   IAM 시뮬레이션: cdk 부트스트랩 Role assume = allowed, 그 밖의 Role(nadeliv-frontend-deploy 등) = deny.
 > - 남은 순서: ① 이 브랜치(`chore/branch-flow-ci`) → develop PR → ② (Role 완료) → ③ develop → Prod 머지로 첫 자동배포 → VocabFn·다이제스트·학습 레슨 동작 확인
 >   → ④ 디자인 브랜치를 develop 기준으로 충돌 해결해 PR.
+> - ✅ 2026-10-14 첫 자동배포 성공 (PR #5 develop→Prod, PR #6 이 브랜치 — #6은 실수로 Prod에 바로 머지됨, develop은 이후 ff로 맞춤).
+>   Deploy 약 3분, `Hariesse*` 3스택 UPDATE_COMPLETE, VocabFn 유지, 스케줄 3개 ENABLED. `HariesseDesign*`은 미변경.
+> - ④ 2026-10-16 디자인 브랜치 → `feat/merge-design-stage`(develop 기준) 충돌 해결. `-c vocab=false` 추가(단어장은 내 배포 전용).
+>   검증: 테스트 137·tsc·synth(양 stage) 통과. 배포된 7스택과 비교 — 리소스 추가/삭제 0, `cdk diff`(change set) = Lambda 코드 해시 +
+>   Outputs 추가(Collect/Curate/Deliver/FeedbackFunctionName, SecretsPrefix)뿐, 교체 없음. `HariesseDesignPipeline`(16개)에 VocabFn 안 생김.
 > - 권장: GitHub에서 Prod 브랜치 보호(PR 필수) — 실수로 Prod에 직접 push해 배포되는 것 방지.
 > - CI의 리전: `bin/app.ts`가 `CDK_DEFAULT_REGION ?? 'ap-northeast-2'`이고 deploy 잡은 `aws-region: ap-northeast-2`를 준다
 >   → 위 단어장 메모의 "리전 없으면 us-east-1로 합성" 문제는 CI에서 생기지 않는다.
+
+> 🆕 **2026-10-04 stage 분리 + 디자인 배포 + 운영 전용 IAM — 2026-10-10 로컬 배포됨, 2026-10-16 develop에 합침 (`feat/merge-design-stage`).**
+> 목적: 여자친구에게 **디자인 다이제스트**를 Telegram으로. AWS 관리와 배포는 내가, 설정·소스 운영은 여자친구 PC의 Claude Code가(운영 전용 IAM 사용자).
+> - `bin/app.ts` 컨텍스트 `stage`: 없으면 기존 이름 그대로(내 배포, 테이블 재생성 없음), `design`이면 `HariesseDesign*` / `/hariesse-design/*` / `hariesse-design/*`.
+>   `constants.ts`의 `configPrefix()`/`stackPrefix()`가 유일한 이름 규칙. Lambda 환경변수 `HARIESSE_STAGE`.
+> - `-c learning=false`: LearnFn + 20:00 스케줄 생략(디자인 배포는 개발 커리큘럼이 맞지 않아 끔). `-c operator=true`: `OperatorStack`.
+> - `OperatorStack`(`lib/stacks/operator-stack.ts`): IAM 사용자 `hariesse-design-operator` + 관리형 정책. 범위 = 그 stage의 SSM/Secrets 접두어, 함수 5개(호출·설정변경·로그), 상태머신, 테이블 3개 R/W, 스택 Outputs 조회, Bedrock 목록 조회. **배포 권한 없음**(`-c operatorDeploy=true`로 켤 수 있으나 bootstrap 실행 역할이 관리자라 사실상 계정 전체 배포권 → 기본 끔).
+>   액세스 키는 CDK로 만들지 않는다(시크릿이 CFN에 남음). 배포 후 `aws iam create-access-key --user-name hariesse-design-operator`로 직접 발급해 전달.
+> - 카테고리 `design` 추가(telegram/notion 라벨 '디자인', add-source 허용). 큐레이션 프롬프트에 SSM `user-persona` 추가(없으면 생략, 내 배포는 영향 없음).
+> - `scripts/seed.ts` `SEED_SET=design`: 디자인 소스 22건(블로그 10 / YouTube 8 / Reddit 4, 2026-10-04 피드 생존 확인) + 디자인 Profile. `npm run seed:design`.
+> - 운영자용 문서 `docs/OPERATOR.md` — 여자친구 PC의 Claude가 이것만 보고 봇 생성 → Secrets/SSM 입력 → webhook → seed → 수동 실행까지 하도록 썼다. Notion은 선택.
+> - 검증: `tsc`, 단위테스트 97개 통과, `cdk synth` 양쪽 성공. `cdk diff`(내 스택) = Lambda 코드 해시 + Outputs 추가만, IAM/환경변수 변화 없음.
+> - 2026-10-16 합칠 때 추가: `-c vocab=false` (단어장은 내 배포 전용 — 디자인 stage엔 VocabFn·21:00 스케줄 없음). `deploy:design` 스크립트에 포함.
+> - **배포 명령**: ~~로컬 `npm run deploy:design`~~ → 이제 Prod 머지 시 CI가 실행. 이후 → 운영자 액세스 키 발급 → 여자친구 PC로 전달 → `docs/OPERATOR.md` §3.
+>   내 스택도 코드가 바뀌었으니(persona 지원, Outputs) 다음 `npx cdk deploy --all`에서 같이 올라간다. 급하지 않음.
+> - ⚠️ **bdb793c를 Prod에 머지할 때 `2e0acab`(SSM GetParameters 10개씩 나눠 조회, PR #2)도 반드시 같이 넣을 것.** 빠지면 `user-persona`로 SSM 이름이 11개가 되어 모든 Lambda의 `getConfig()`가 ValidationException으로 죽는다(design은 10/4~10/10 7회 연속 실패).
 
 ---
 

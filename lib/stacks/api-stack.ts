@@ -6,15 +6,17 @@ import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import { ENV, SECRETS } from '../../src/lib/constants';
+import { ENV, configPrefix, secretNames } from '../../src/lib/constants';
 
 export interface ApiStackProps extends cdk.StackProps {
   sourcesTable: dynamodb.Table;
   articlesTable: dynamodb.Table;
   profileTable: dynamodb.Table;
   rawBucket: s3.Bucket;
-  /** TOEFL 단어장 Lambda (PipelineStack) — Telegram 메시지를 비동기로 넘긴다 */
-  vocabFn: lambda.IFunction;
+  /** 배포 stage (없으면 기본 배포). */
+  stage?: string;
+  /** TOEFL 단어장 Lambda (PipelineStack) — Telegram 메시지를 비동기로 넘긴다. 없으면 단어장 꺼짐. */
+  vocabFn?: lambda.IFunction;
 }
 
 /**
@@ -23,10 +25,14 @@ export interface ApiStackProps extends cdk.StackProps {
  * 배포 후: setWebhook으로 Function URL + secret_token 등록 필요.
  */
 export class ApiStack extends cdk.Stack {
+  readonly feedbackFn: lambda.IFunction;
+
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    const { sourcesTable, articlesTable, profileTable, rawBucket, vocabFn } = props;
+    const { sourcesTable, articlesTable, profileTable, rawBucket, stage, vocabFn } = props;
+    const prefix = configPrefix(stage);
+    const SECRETS = secretNames(prefix.secrets);
 
     const feedbackFn = new NodejsFunction(this, 'FeedbackFn', {
       entry: path.join(__dirname, '..', '..', 'src', 'handlers', 'feedback', 'index.ts'),
@@ -41,7 +47,8 @@ export class ApiStack extends cdk.Stack {
         [ENV.ARTICLES_TABLE]: articlesTable.tableName,
         [ENV.PROFILE_TABLE]: profileTable.tableName,
         [ENV.RAW_BUCKET]: rawBucket.bucketName,
-        [ENV.VOCAB_FUNCTION_NAME]: vocabFn.functionName,
+        ...(stage ? { [ENV.STAGE]: stage } : {}),
+        ...(vocabFn ? { [ENV.VOCAB_FUNCTION_NAME]: vocabFn.functionName } : {}),
       },
       bundling: {
         externalModules: ['@aws-sdk/*'],
@@ -53,7 +60,7 @@ export class ApiStack extends cdk.Stack {
     feedbackFn.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ssm:GetParameters', 'ssm:GetParameter'],
-        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/hariesse/*`],
+        resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter${prefix.ssm}/*`],
       })
     );
     feedbackFn.addToRolePolicy(
@@ -70,12 +77,14 @@ export class ApiStack extends cdk.Stack {
     articlesTable.grantReadWriteData(feedbackFn);
     sourcesTable.grantReadWriteData(feedbackFn);
     profileTable.grantReadWriteData(feedbackFn);
-    vocabFn.grantInvoke(feedbackFn);
+    vocabFn?.grantInvoke(feedbackFn);
 
     const fnUrl = feedbackFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE, // 인증은 핸들러의 secret_token 검증
     });
 
+    this.feedbackFn = feedbackFn;
+    new cdk.CfnOutput(this, 'FeedbackFunctionName', { value: feedbackFn.functionName });
     new cdk.CfnOutput(this, 'FeedbackUrl', { value: fnUrl.url });
   }
 }
