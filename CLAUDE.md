@@ -10,7 +10,11 @@
 > **2026-09-30 학습 트랙 증분: 매일 20:00 KST 기술 레슨 1건(Telegram + Notion 학습노트) — 2026-10-04 배포·E2E 검증 완료.**
 > **2026-10-11 TOEFL 단어장 증분: Telegram/Notion에 적으면 뜻 채우고 매일 21:00 KST 간격 반복 복습 — 2026-10-11 배포 (HANDOFF 맨 위 블록).**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
+> **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자 — 10/10 배포, 10/16 develop에 합침.**
 > **다음 증분은 Phase 2 개인화(가중치 학습 슬롯 반영, isNovel 실제 신호) — HANDOFF §7 로드맵 참고.**
+
+> 🧑‍🎨 **운영자 세션(다른 PC, IAM 사용자 `hariesse-design-operator`)이라면 [docs/OPERATOR.md](./docs/OPERATOR.md)만 보면 된다.**
+> 그 자격증명으로는 `stage=design` 리소스 운영만 가능하고 배포·다른 stage 접근은 안 된다.
 
 ## ⚠️ 브랜치 / 배포 규칙 (2026-10-14 결정 — 반드시 지킬 것)
 Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`~/.claude`)·워크트리는 **PC마다 따로라서 공유되지 않는다.**
@@ -26,6 +30,17 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
 - 결정·배포 기록은 HANDOFF.md에 커밋한다. 로컬 메모리에만 적으면 다른 PC에서는 모른다.
 - 배포 Role: `hariesse-github-deploy` (`infra/github-deploy-role.yaml`, Prod 브랜치에서만 assume 가능). 이 Role만 예외적으로 로컬 `aws cloudformation deploy`.
 - 예외: SSM 값 변경·seed·add-source·Lambda 수동 invoke 같은 **운영 작업**은 지금처럼 세션에서 AWS CLI로 한다 (코드 배포가 아니므로).
+
+## stage (같은 계정에 여러 벌)
+- stage 없음 = 내 배포: 스택 `Hariesse*`, SSM `/hariesse/*`, Secrets `hariesse/*`. **기존 이름 그대로, 바꾸지 말 것(테이블 재생성됨).**
+- `stage=design` = 디자인 배포: 스택 `HariesseDesign*`, SSM `/hariesse-design/*`, Secrets `hariesse-design/*`.
+  Lambda에는 환경변수 `HARIESSE_STAGE`로 전달되고, 런타임은 `constants.ts`의 `configPrefix()`로 같은 규칙을 쓴다.
+- 한 번의 synth/deploy는 한 stage만 다룬다. `npm run deploy:design` = `-c stage=design -c learning=false -c vocab=false -c operator=true`
+  (CI가 Prod 배포 때 `deploy:design`도 실행한다 — 로컬에서 돌리지 말 것).
+  `operator=true`는 `OperatorStack`(운영 전용 IAM 사용자 + 접두어 범위 정책)을 만든다. `-c operatorDeploy=true`를 주면 CDK 배포 권한까지 붙지만 기본은 끔.
+- 시드도 세트로 나뉜다: `npm run seed`(내 것) / `npm run seed:design`(디자인). **테이블 이름이 어느 stage 것인지 확인하고 실행.**
+- `-c vocab=false`: VocabFn + 21:00 복습 스케줄 생략, Feedback Lambda에 `VOCAB_FUNCTION_NAME`이 없어 메시지는 무시. TOEFL 단어장은 내 배포 전용.
+- 카테고리 `design` 추가됨. 큐레이션 프롬프트에 SSM `user-persona`(사용자 소개)가 들어간다(없으면 생략).
 
 ## 현재 상태: Phase 1 + Feedback + 소스 확장
 `Collection → Curation → Delivery → Feedback` 루프가 끝까지 동작.
