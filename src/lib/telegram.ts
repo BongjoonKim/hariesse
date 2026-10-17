@@ -278,13 +278,15 @@ function vocabDetailLines(entry: VocabEntry): string[] {
   return lines;
 }
 
-/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄. 순수함수. */
-export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean }): string {
+/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄, corrected = 수정 요청을 반영함. 순수함수. */
+export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean; corrected?: boolean }): string {
   const kind = entry.kind ? KIND_LABEL[entry.kind] : '표현';
   const lines = [
-    opts.repeated
-      ? `📌 <b>이미 있는 ${kind}예요</b> · 헷갈린 횟수 ${entry.missCount}`
-      : `📝 <b>저장했어요</b> · ${kind}`,
+    opts.corrected
+      ? `✏️ <b>고쳤어요</b> · ${kind}`
+      : opts.repeated
+        ? `📌 <b>이미 있는 ${kind}예요</b> · 헷갈린 횟수 ${entry.missCount}`
+        : `📝 <b>저장했어요</b> · ${kind}`,
     vocabHeadline(entry),
     ...vocabDetailLines(entry),
   ];
@@ -294,6 +296,10 @@ export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean }):
   else if (entry.nextReview) lines.push(`🗓 다음 복습 ${shortDate(entry.nextReview)}`);
   return lines.join('\n');
 }
+
+/** 한국어 수정 요청이 왔는데 어느 표현을 고칠지 모를 때. */
+export const VOCAB_CORRECTION_TARGET_MISSING =
+  '✏️ 어느 표현을 고칠지 모르겠어요. 고칠 표현의 카드(저장·복습 메시지)에 <b>답장</b>으로 보내 주세요.';
 
 export function formatReviewHeader(count: number, remaining: number): string {
   const more = remaining > 0 ? `\n<i>밀린 복습 ${remaining}개는 다음에 이어서 나와요</i>` : '';

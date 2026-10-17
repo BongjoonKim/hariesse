@@ -2,7 +2,7 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
-import type { Curation, LessonContent, SourceType, VocabEnrichment, VocabKind } from './types';
+import type { Curation, LessonContent, SourceType, VocabEnrichment, VocabEntry, VocabKind, VocabRevision } from './types';
 import { AREA_LABEL } from '../domain/curriculum';
 import type { LessonPlan } from '../domain/learning';
 
@@ -239,6 +239,60 @@ export function parseVocabEnrichment(text: string): VocabEnrichment {
   };
   if (!result.meaning) throw new Error(`단어 응답에 뜻 없음: ${text.slice(0, 200)}`);
   return result;
+}
+
+// ---- 수정 요청: 사용자가 카드를 보고 "이 뜻이 아니라 ~"라고 한 말을 반영해 카드를 다시 쓴다
+
+const VOCAB_REVISE_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 사용자가 이미 저장한 영어 단어·표현·문장의 학습 카드를 보고
+한국어로 수정을 요청했다. 요청을 반영해 카드를 다시 쓴다. 사용자는 한국어 화자이고 TOEFL iBT를 준비 중이다.
+
+작성 원칙:
+- 사용자의 요청이 최우선이다. 사용자가 말한 뜻·뉘앙스·문맥이 사전적 의미와 달라 보여도 사용자의 해석을 따른다.
+- 요청과 상관없는 칸은 원래 값을 그대로 둔다. 요청으로 뜻이 바뀌어 다른 칸(예문·메모·핵심 표현)이 틀리게 되면 그 칸만 맞춰 고친다.
+- 뜻·번역·설명은 한국어로. 형식은 원래 카드와 같게 (단어: meaning 1~3개 / 문장: meaning = 번역, note = "표현: 뜻" 한 줄씩).
+- 사용자가 표현 자체의 철자·단어를 고쳐 달라고 했을 때만 text를 고친 표현으로 채우고, 아니면 text는 원래 표현 그대로.
+- 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
+{"text": "<표현>", "meaning": "<뜻 또는 번역>", "pos": "<품사 또는 빈 문자열>", "pronunciation": "<IPA 또는 빈 문자열>",
+ "example": "<영어 예문 또는 빈 문자열>", "exampleKo": "<예문 번역 또는 빈 문자열>", "synonyms": ["<동의어>", ...], "note": "<팁 또는 핵심 표현>"}`;
+
+type VocabCard = Pick<VocabEntry, 'text' | 'kind' | 'meaning' | 'pos' | 'pronunciation' | 'example' | 'synonyms' | 'note'>;
+
+export function buildVocabRevisionPrompt(entry: VocabCard, instruction: string): string {
+  // 저장된 예문은 "영어\n→ 번역" 한 칸이라 응답 스키마(example / exampleKo)에 맞춰 나눠 보여준다
+  const [example = '', exampleKo = ''] = (entry.example ?? '').split('\n→ ');
+  const card = {
+    text: entry.text,
+    kind: entry.kind === 'sentence' ? '문장' : '단어/표현',
+    meaning: entry.meaning ?? '',
+    pos: entry.pos ?? '',
+    pronunciation: entry.pronunciation ?? '',
+    example,
+    exampleKo,
+    synonyms: entry.synonyms ?? '',
+    note: entry.note ?? '',
+  };
+  return `현재 카드:
+${JSON.stringify(card, null, 2)}
+
+사용자의 수정 요청: ${instruction}
+
+요청을 반영한 카드를 JSON으로만 답하라.`;
+}
+
+/** Bedrock 응답 → VocabRevision. 뜻이 비면 throw. 순수함수. */
+export function parseVocabRevision(text: string): VocabRevision {
+  const p = parseJsonObject(text);
+  return { ...parseVocabEnrichment(text), text: str(p.text) || undefined };
+}
+
+export async function reviseVocab(
+  modelId: string,
+  region: string,
+  entry: VocabCard,
+  instruction: string
+): Promise<VocabRevision> {
+  const raw = await invokeClaude(modelId, region, VOCAB_REVISE_SYSTEM_PROMPT, buildVocabRevisionPrompt(entry, instruction), 800);
+  return parseVocabRevision(raw);
 }
 
 export async function enrichVocab(

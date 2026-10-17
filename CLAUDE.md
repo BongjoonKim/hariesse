@@ -9,6 +9,7 @@
 > **2026-09-06 소스 확장 증분: YouTube + Reddit 수집 어댑터 — 배포 완료, 매일 수집 중 (2026-10-04 확인).**
 > **2026-09-30 학습 트랙 증분: 매일 20:00 KST 기술 레슨 1건(Telegram + Notion 학습노트) — 2026-10-04 배포·E2E 검증 완료.**
 > **2026-10-11 TOEFL 단어장 증분: Telegram/Notion에 적으면 뜻 채우고 매일 21:00 KST 간격 반복 복습 — 2026-10-11 배포 (HANDOFF 맨 위 블록).**
+> **2026-10-17 단어장 뜻 수정: 카드에 답장하거나 한국어로 "~라는 뜻이야"라고 보내면 새 표현 대신 그 카드를 고친다 — develop PR, Prod 미반영.**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자 — 10/10 배포, 10/16 develop에 합침.**
 > **다음 증분은 Phase 2 개인화(가중치 학습 슬롯 반영, isNovel 실제 신호) — HANDOFF §7 로드맵 참고.**
@@ -54,6 +55,7 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
 - **TOEFL 단어장**: 봇에 영어 단어·표현·문장을 보내거나 Notion "TOEFL Vocab" DB에 `표현`만 적으면
   Bedrock이 빈 칸(뜻/번역·품사·예문·동의어·TOEFL 팁)을 채운다. 매일 21:00 KST에 복습 퀴즈(뜻은 스포일러)
   `[✅ 알아요][❌ 몰라요]` → Leitner 박스(1·3·7·14·30일). **원본 저장소는 Notion DB** (DynamoDB에 따로 두지 않음).
+  뜻이 틀리면 카드에 **답장**하거나 답장 없이 한국어로 고쳐 달라고 하면(24시간 안 마지막 저장 표현) Bedrock이 카드를 다시 쓴다.
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 
@@ -115,6 +117,7 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - **단어장 메시지는 내 채팅만**: 봇엔 누구나 말을 걸 수 있다. Feedback은 SSM `telegram-chat-id`와 다른 채팅의 message를 버린다.
   webhook `allowed_updates`에 `message`가 있어야 메시지가 온다.
 - **단어장 enrich는 빈 칸만 채운다**: 사용자가 Notion에 적은 뜻·예문을 Bedrock 결과로 덮지 말 것 (`fillFromEnrichment`).
+  예외는 사용자가 직접 보낸 **수정 요청**(`applyRevision`) — 그때만 채워진 칸을 덮는다. 한글이 영문보다 많은 메시지는 새 표현으로 저장하지 않는다(`isCorrectionRequest`).
 - **VocabFn 비동기 재시도 0회**: capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다.
 - **SSM GetParameters는 1회 10개까지**: `getConfig()`가 10개씩 나눠 조회한다. SSM 이름을 늘려도 그대로 둘 것.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.
