@@ -104,6 +104,11 @@ export interface VocabEnrichment {
   note?: string;
 }
 
+/** 사용자의 수정 요청을 반영한 카드. text는 표현 자체를 고칠 때만 (철자 등). */
+export interface VocabRevision extends VocabEnrichment {
+  text?: string;
+}
+
 /** Notion "TOEFL Vocab" DB 한 행. Notion이 원본 저장소다. */
 export interface VocabEntry {
   /** Notion page id (하이픈 없는 32자) */

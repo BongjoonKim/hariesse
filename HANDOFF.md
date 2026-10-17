@@ -52,6 +52,18 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
+> ✏️ **2026-10-17 단어장 뜻 수정 증분** (브랜치 `claude/user-edit-translations-974de8` → develop PR, Prod 미반영).
+> 문제: 카드 번역이 어색해서 "고용이 아니라 근무가 시작된다는 뜻이야"라고 보냈더니 그 한국어 문장이 **새 표현으로 저장**됐다.
+> - 수정 요청 판별(`isCorrectionRequest`, 순수함수): 한글이 영문자보다 많은 메시지는 새 표현이 아니라 수정 요청. `표현 :: 뜻`·`#태그`는 세지 않는다.
+> - 대상 표현: ① 카드(저장·복습 메시지)에 **답장**했으면 그 카드 — Feedback Lambda가 `reply_to_message.reply_markup`의 `t1|` callback에서 page id를 꺼내 `replyToPageId`로 넘긴다.
+>   ② 답장이 없으면 **24시간 안에 마지막으로 저장·수정한 표현**(Profile `pk='VOCAB'`의 `lastCapturePageId`/`lastCaptureAt`). 둘 다 없으면 답장으로 보내 달라고 안내.
+> - 반영: 현재 카드 + 요청을 Bedrock(`reviseVocab`)에 주고 카드를 다시 쓴다. enrich와 달리 채워진 칸도 덮지만 응답이 비운 칸은 원래 값 유지.
+>   표현 자체를 고치면(철자 등) `text`·`키`·`종류`도 같이 바꾸되, 그 키가 이미 다른 행이면 표현은 두고 뜻만 고친다. 복습 상태(박스·다음 복습)는 안 건드림.
+> - 답장 카드 `✏️ 고쳤어요` + `🗑 삭제` 버튼. `/help`류 사용법에 수정 방법 추가.
+> - `putVocabReviewState` → `updateVocabReviewState`(SET 머지): 복습 발송일과 마지막 저장 표현이 서로를 지우지 않게.
+> - 검증: `tsc`, 단위테스트 146개(신규 10), `cdk synth` 성공. **E2E는 배포 후**: 카드 답장으로 수정 1건 + 답장 없이 한국어 수정 1건 + Notion 행 갱신 확인.
+> - 잘못 저장된 한국어 행("고용이라기 보다는…")은 그 카드의 `🗑 삭제`로 지우면 된다 (코드가 지우지 않음).
+
 > 🆕 **2026-10-11 TOEFL 단어장 증분 — 2026-10-11 배포 완료** (브랜치 `claude/toefl-vocab-tracking-971d54` → `develop` d12e86b, Prod 미반영).
 > 목적: TOEFL 공부 중 만난 단어·표현·문장을 Telegram이나 Notion에 적어 두면 뜻을 채워 주고, 간격 반복으로 복습시킨다.
 > - **원본 저장소 = Notion DB "TOEFL Vocab"** (`5582e65c809b45e1b420325db9fc9adb`, 부모 페이지 `38de549e…` = hariesse Archive와 같은 위치. 그 페이지 이름이 "My secretary" → "봉준 개발목록"으로 바뀜).

@@ -281,6 +281,9 @@ export interface VocabReviewState {
   pk: 'VOCAB';
   /** 정기 복습을 마지막으로 보낸 날 (KST YYYY-MM-DD) — 같은 날 중복 발송 방지 */
   lastReviewDate?: string;
+  /** 마지막으로 저장·수정한 표현의 Notion page id — 답장 없이 보낸 한국어 수정 요청이 향하는 곳 */
+  lastCapturePageId?: string;
+  lastCaptureAt?: string;
   updatedAt: string;
 }
 
@@ -289,6 +292,19 @@ export async function getVocabReviewState(table: string): Promise<VocabReviewSta
   return res.Item as VocabReviewState | undefined;
 }
 
-export async function putVocabReviewState(table: string, state: VocabReviewState): Promise<void> {
-  await doc.send(new PutCommand({ TableName: table, Item: state }));
+/** 넘긴 필드만 갱신한다 (복습 발송일과 마지막 저장 표현이 서로를 지우지 않게). */
+export async function updateVocabReviewState(
+  table: string,
+  patch: Partial<Omit<VocabReviewState, 'pk'>> & Pick<VocabReviewState, 'updatedAt'>
+): Promise<void> {
+  const entries = Object.entries(patch).filter(([, v]) => v !== undefined);
+  await doc.send(
+    new UpdateCommand({
+      TableName: table,
+      Key: { pk: 'VOCAB' },
+      UpdateExpression: `SET ${entries.map(([k]) => `#${k} = :${k}`).join(', ')}`,
+      ExpressionAttributeNames: Object.fromEntries(entries.map(([k]) => [`#${k}`, k])),
+      ExpressionAttributeValues: Object.fromEntries(entries.map(([k, v]) => [`:${k}`, v])),
+    })
+  );
 }
