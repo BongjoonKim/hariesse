@@ -6,6 +6,7 @@ import {
   detectKind,
   parseVocabMessage,
   punctuateQuestion,
+  splitKoreanTail,
   fillFromEnrichment,
   initialReview,
   applyReview,
@@ -87,6 +88,40 @@ describe('입력 파싱', () => {
     expect(punctuateQuestion('what if')).toBe('what if');
     expect(punctuateQuestion('how')).toBe('how');
     expect(punctuateQuestion('The findings corroborate the hypothesis')).toBe('The findings corroborate the hypothesis');
+  });
+
+  it('영어 표현 뒤의 한국어 설명 꼬리는 뗀다 (2026-10-17 Notion 감사 사례)', () => {
+    const cases: [string, string][] = [
+      ['we appreciate your prompt response에서 prompt가 신속한이라는 뜻이래', 'we appreciate your prompt response'],
+      ['prone이 ~하기 쉬운이래', 'prone'],
+      ['to arrange a follow-up interview 뜻이 후속 면접을 잡기 위함이래', 'to arrange a follow-up interview'],
+      ['Thank you all for being so proactive가 모두 매우 선제적으로 움직여줘서 고마워요 라는 뜻', 'Thank you all for being so proactive'],
+      ['to whom it may concern 뜻이 관계자분께야?', 'to whom it may concern'],
+      [
+        'The technical integration slides are finished, and the new checkout flow demo runs smoothly. 에서 checkout이 결제라는 뜻이네',
+        'The technical integration slides are finished, and the new checkout flow demo runs smoothly.',
+      ],
+      ["i still haven't received my checked baggage from my flight on August 7. 에서 checked baggage가 위탁 수하물이래",
+        "i still haven't received my checked baggage from my flight on August 7."],
+    ];
+    for (const [input, expected] of cases) expect(splitKoreanTail(input).text).toBe(expected);
+    expect(splitKoreanTail('prone이 ~하기 쉬운이래').tail).toBe('이 ~하기 쉬운이래');
+    expect(splitKoreanTail('ubiquitous')).toEqual({ text: 'ubiquitous' });
+    // 한국어로 시작하면 나누지 않는다 (수정 요청 판별이 맡는다)
+    expect(splitKoreanTail('고용이라기 보다는 근무가 시작한다는 뜻이야')).toEqual({ text: '고용이라기 보다는 근무가 시작한다는 뜻이야' });
+    expect(splitKoreanTail('ㅋㅋ what')).toEqual({ text: 'ㅋㅋ what' });
+  });
+
+  it('파싱: 꼬리를 뗀 영어가 물음표·종류·뜻 처리를 그대로 거치고, 한국어만 있는 줄은 버린다', () => {
+    expect(parseVocabMessage('prone이 ~하기 쉬운이래 #reading')).toEqual([
+      { text: 'prone', meaning: undefined, tags: ['reading'], kind: 'word' },
+    ]);
+    expect(parseVocabMessage('who is he 뜻이 그는 누구니래')).toEqual([
+      { text: 'who is he?', meaning: undefined, tags: [], kind: 'sentence' },
+    ]);
+    // `::` 뜻은 꼬리가 아니라 사용자가 적은 뜻
+    expect(parseVocabMessage('mitigate :: 완화하다')).toEqual([{ text: 'mitigate', meaning: '완화하다', tags: [], kind: 'word' }]);
+    expect(parseVocabMessage('abate\n이건 한국어 줄')).toEqual([{ text: 'abate', meaning: undefined, tags: [], kind: 'word' }]);
   });
 
   it('파싱 때 의문문은 ? 가 붙고 문장으로 분류된다', () => {

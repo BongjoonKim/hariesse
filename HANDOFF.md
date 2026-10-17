@@ -52,6 +52,14 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
+> ✂️ **2026-10-17 단어장 한국어 꼬리 분리 증분** (같은 브랜치 `claude/community-fundraiser-lead-bc8421`, PR #12에 포함, Prod 미반영).
+> 배경: Notion "TOEFL Vocab" 27건을 감사해 보니 13건이 "we appreciate your prompt response에서 prompt가 신속한이라는 뜻이래",
+> "prone이 ~하기 쉬운이래"처럼 영어 뒤에 한국어 설명이 붙은 채 **표현으로 저장**돼 있었다 (영문이 한글보다 길어 `isCorrectionRequest`에 안 걸림).
+> 그날 Notion은 손으로 정리함: 꼬리 제거 13건, 물음표 2건, 오타 4건, 순수 한국어 요청 1건 휴지통.
+> - `splitKoreanTail`(순수함수): 첫 한글 문자부터 끝까지를 꼬리로 보고 영어 앞부분만 표현으로 저장. 꼬리는 버린다(뜻·메모는 Bedrock이 채움).
+> - 한국어로 시작하는 줄은 나누지 않는다(수정 요청 판별이 맡음). 메시지 단위 판별을 통과했는데 한국어만 남은 줄은 저장하지 않고 버린다.
+> - 꼬리를 뗀 영어는 기존 `punctuateQuestion` → `detectKind` → `normalizeVocabKey`를 그대로 거친다. `표현 :: 뜻`의 `::` 뒤는 꼬리가 아니다.
+
 > ❓ **2026-10-17 단어장 의문문 물음표 증분** (브랜치 `claude/community-fundraiser-lead-bc8421` → develop PR, Prod 미반영).
 > "who is going to lead the community fundraiser"처럼 물음표 없이 보낸 의문문은 저장 때 `?`를 붙인다 (`punctuateQuestion`, `src/domain/vocab.ts`, 순수함수).
 > - 판정은 보수적: 의문사(who/what/which/when/where/why/how…)로 시작하고 3단어 안에 조동사가 오거나(who's/what's·how come 포함),

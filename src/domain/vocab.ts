@@ -107,7 +107,24 @@ export function detectKind(text: string): VocabKind {
   return t.split(/\s+/).length <= WORD_MAX_TOKENS ? 'word' : 'sentence';
 }
 
-/** 메시지 한 줄 → 표현 1건. 빈 줄은 무시, 최대 MAX_INPUTS_PER_MESSAGE건. 물음표 없는 의문문은 `?`를 붙인다. */
+/**
+ * "영어 표현 + 한국어 설명 꼬리"를 나눈다. 첫 한글 문자부터 끝까지를 꼬리로 본다.
+ * "we appreciate your prompt response에서 prompt가 신속한이라는 뜻이래" → text "we appreciate your prompt response".
+ * 꼬리는 사용자가 메모 삼아 적은 설명이라 저장하지 않는다 (뜻·메모는 Bedrock이 채운다).
+ * 앞부분에 영문자가 없으면(한국어로 시작) 나누지 않고 그대로 돌려준다 — 그런 줄은 수정 요청 판별(isCorrectionRequest)이 맡는다. 순수함수.
+ */
+export function splitKoreanTail(line: string): { text: string; tail?: string } {
+  const idx = line.search(/[\uac00-\ud7a3\u3131-\u318e]/);
+  if (idx === -1) return { text: line };
+  const head = line.slice(0, idx).trim();
+  if (!/[A-Za-z]/.test(head)) return { text: line };
+  return { text: head, tail: line.slice(idx).trim() };
+}
+
+/**
+ * 메시지 한 줄 → 표현 1건. 빈 줄은 무시, 최대 MAX_INPUTS_PER_MESSAGE건.
+ * 한국어 설명 꼬리는 떼고, 물음표 없는 의문문은 `?`를 붙인다. 한국어만 있는 줄은 건너뛴다.
+ */
 export function parseVocabMessage(message: string): VocabInput[] {
   const inputs: VocabInput[] = [];
   for (const rawLine of message.split(/\r?\n/)) {
@@ -121,9 +138,13 @@ export function parseVocabMessage(message: string): VocabInput[] {
     if (!line) continue;
 
     const sep = line.indexOf('::');
-    const text = punctuateQuestion((sep === -1 ? line : line.slice(0, sep)).trim());
+    const raw = (sep === -1 ? line : line.slice(0, sep)).trim();
     const meaning = sep === -1 ? undefined : line.slice(sep + 2).trim() || undefined;
-    if (!text) continue;
+    if (!raw) continue;
+    const { text: english } = splitKoreanTail(raw);
+    // 한국어로 시작하는 줄은 영어 학습 자료가 아니다 — 표현으로 저장하지 않는다
+    if (/[\uac00-\ud7a3]/.test(english)) continue;
+    const text = punctuateQuestion(english);
 
     inputs.push({ text, meaning, tags: [...new Set(tags)], kind: detectKind(text) });
     if (inputs.length >= MAX_INPUTS_PER_MESSAGE) break;

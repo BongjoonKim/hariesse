@@ -57,6 +57,7 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
   `[✅ 알아요][❌ 몰라요]` → Leitner 박스(1·3·7·14·30일). **원본 저장소는 Notion DB** (DynamoDB에 따로 두지 않음).
   뜻이 틀리면 카드에 **답장**하거나 답장 없이 한국어로 고쳐 달라고 하면(24시간 안 마지막 저장 표현) Bedrock이 카드를 다시 쓴다.
   물음표 없이 보낸 의문문("who is going to lead the fundraiser")은 저장 때 `?`를 붙인다(`punctuateQuestion`, Telegram 입력만).
+  "prone이 ~하기 쉬운이래"처럼 영어 뒤에 붙은 한국어 설명 꼬리는 떼고 영어만 저장한다(`splitKoreanTail`). 한국어로 시작하는 줄은 저장하지 않는다.
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 
