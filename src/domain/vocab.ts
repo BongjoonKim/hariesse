@@ -1,4 +1,4 @@
-import type { VocabEnrichment, VocabEntry, VocabKind, VocabStatus } from '../lib/types';
+import type { VocabEnrichment, VocabEntry, VocabKind, VocabRevision, VocabStatus } from '../lib/types';
 
 /**
  * TOEFL 단어장 도메인 로직 (순수함수, 테스트 대상).
@@ -95,6 +95,67 @@ export function parseVocabMessage(message: string): VocabInput[] {
 }
 
 export type EnrichedFields = Pick<VocabEntry, 'meaning' | 'pos' | 'pronunciation' | 'example' | 'synonyms' | 'note'>;
+
+// ---------------------------------------------------------------- 수정 요청 판별
+
+/**
+ * 영어 입력이 아니라 "뜻을 고쳐 달라"는 한국어 요청인지. 한글이 영문자보다 많으면 요청으로 본다.
+ * `표현 :: 뜻` 형식은 뜻이 한국어라도 단어 입력이다 (`::` 뒤는 세지 않는다).
+ * 영어 학습 자료만 저장하는 단어장이라 한국어 문장을 새 표현으로 저장할 일은 없다.
+ */
+export function isCorrectionRequest(message: string): boolean {
+  const body = message
+    .split(/\r?\n/)
+    .map((line) => (line.includes('::') ? line.slice(0, line.indexOf('::')) : line).replace(TAG_RE, '$1'))
+    .join('\n');
+  const hangul = (body.match(/[\uac00-\ud7a3]/g) ?? []).length;
+  const latin = (body.match(/[A-Za-z]/g) ?? []).length;
+  return hangul > 0 && hangul > latin;
+}
+
+/** Telegram 메시지의 inline 키보드(답장 대상 카드)에서 단어장 page id를 찾는다. 없으면 undefined. */
+export function pageIdFromReplyMarkup(markup: { inline_keyboard?: { callback_data?: string }[][] } | undefined): string | undefined {
+  for (const row of markup?.inline_keyboard ?? []) {
+    for (const button of row) {
+      const decoded = decodeVocabCallback(button.callback_data);
+      if (decoded) return decoded.pageId;
+    }
+  }
+  return undefined;
+}
+
+/** 답장 없이 온 한국어 수정 요청은 이 시간 안에 저장한 표현에만 적용한다 (며칠 전 표현을 엉뚱하게 고치지 않게). */
+export const CORRECTION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function isWithinCorrectionWindow(lastCaptureAt: string | undefined, now: Date = new Date()): boolean {
+  if (!lastCaptureAt) return false;
+  const at = Date.parse(lastCaptureAt);
+  return Number.isFinite(at) && now.getTime() - at <= CORRECTION_WINDOW_MS;
+}
+
+export type RevisedFields = EnrichedFields & Partial<Pick<VocabEntry, 'text' | 'key' | 'kind'>>;
+
+/**
+ * 수정 결과로 바꿀 필드. 사용자가 고쳐 달라고 한 것이라 채워진 칸도 바꾸되, 응답이 비운 칸은 원래 값을 둔다
+ * (LLM이 빠뜨린 칸 때문에 발음·예문이 지워지지 않게). text가 바뀌면 key·kind도 같이 간다 (철자 교정 등). 순수함수.
+ */
+export function applyRevision(entry: Pick<VocabEntry, 'text' | 'key' | 'kind'> & EnrichedFields, revision: VocabRevision): RevisedFields {
+  const revised = fillFromEnrichment({}, revision);
+  const fields: RevisedFields = {
+    meaning: revised.meaning ?? entry.meaning,
+    pos: revised.pos ?? entry.pos,
+    pronunciation: revised.pronunciation ?? entry.pronunciation,
+    example: revised.example ?? entry.example,
+    synonyms: revised.synonyms ?? entry.synonyms,
+    note: revised.note ?? entry.note,
+  };
+  const text = revision.text?.trim();
+  if (text && text !== entry.text.trim()) {
+    const key = normalizeVocabKey(text);
+    if (key) Object.assign(fields, { text, key, kind: detectKind(text) });
+  }
+  return fields;
+}
 
 /**
  * Bedrock 결과로 빈 칸만 채운다. 사용자가 직접 쓴 뜻·예문 등은 절대 덮어쓰지 않는다

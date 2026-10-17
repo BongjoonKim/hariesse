@@ -13,13 +13,17 @@ import {
   needsEnrichment,
   encodeVocabCallback,
   decodeVocabCallback,
+  isCorrectionRequest,
+  pageIdFromReplyMarkup,
+  applyRevision,
+  isWithinCorrectionWindow,
   MAX_INPUTS_PER_MESSAGE,
   type ReviewFields,
   type VocabAction,
 } from '../src/domain/vocab';
 import { buildVocabProperties, parseVocabPage, VOCAB_PROP } from '../src/lib/notion-vocab';
-import { formatVocabCard, formatReviewItem } from '../src/lib/telegram';
-import { parseVocabEnrichment, buildVocabPrompt } from '../src/lib/bedrock';
+import { formatVocabCard, formatReviewItem, buildVocabSavedKeyboard, buildReviewKeyboard } from '../src/lib/telegram';
+import { parseVocabEnrichment, buildVocabPrompt, parseVocabRevision, buildVocabRevisionPrompt } from '../src/lib/bedrock';
 import type { VocabEntry } from '../src/lib/types';
 
 const TODAY = '2026-10-11';
@@ -77,6 +81,81 @@ describe('입력 파싱', () => {
   it('한 메시지 최대 건수 제한', () => {
     const many = Array.from({ length: 15 }, (_, i) => `word${i}`).join('\n');
     expect(parseVocabMessage(many)).toHaveLength(MAX_INPUTS_PER_MESSAGE);
+  });
+});
+
+describe('수정 요청', () => {
+  it('한국어가 영문보다 많으면 수정 요청, 영어 입력은 아니다', () => {
+    expect(isCorrectionRequest('고용이라기 보다는 근무가 9/1일 부터 시작할 거라는 뜻이 맞을 것 같아 수정해줘')).toBe(true);
+    expect(isCorrectionRequest("commence는 '근무를 시작하다'로 번역해줘")).toBe(true);
+    expect(isCorrectionRequest('the employment will commerce on Septemper 1')).toBe(false);
+    expect(isCorrectionRequest('ubiquitous')).toBe(false);
+    expect(isCorrectionRequest('')).toBe(false);
+  });
+
+  it('`표현 :: 뜻`과 #태그는 뜻이 한국어라도 단어 입력이다', () => {
+    expect(isCorrectionRequest('mitigate :: 완화하다, 줄이다 #reading')).toBe(false);
+    expect(isCorrectionRequest('take into account :: 고려하다\nabate :: 약해지다')).toBe(false);
+  });
+
+  it('답장 대상 카드의 키보드에서 page id를 찾는다', () => {
+    expect(pageIdFromReplyMarkup(buildVocabSavedKeyboard(PAGE_ID))).toBe(PAGE_ID);
+    expect(pageIdFromReplyMarkup(buildReviewKeyboard(PAGE_ID))).toBe(PAGE_ID);
+    // 다이제스트·레슨 메시지에 답장한 건 단어장 수정이 아니다
+    expect(pageIdFromReplyMarkup({ inline_keyboard: [[{ callback_data: 'v1|like|abc' }]] })).toBeUndefined();
+    expect(pageIdFromReplyMarkup({ inline_keyboard: [] })).toBeUndefined();
+    expect(pageIdFromReplyMarkup(undefined)).toBeUndefined();
+  });
+
+  const revision = {
+    meaning: '근무는 9월 1일에 시작될 것이다',
+    pos: undefined,
+    pronunciation: undefined,
+    example: undefined,
+    exampleKo: undefined,
+    synonyms: [],
+    note: 'employment: (여기서는) 근무, 고용 관계\ncommence: 시작하다',
+  };
+
+  it('수정 결과는 채워진 칸도 덮어쓰고, 표현이 그대로면 text·key는 건드리지 않는다', () => {
+    const fields = applyRevision(
+      { text: 'the employment will commerce on Septemper 1', key: 'x', kind: 'sentence', meaning: '고용은 9월 1일에 시작될 것이다' },
+      revision
+    );
+    expect(fields.meaning).toBe('근무는 9월 1일에 시작될 것이다');
+    expect(fields.note).toContain('근무');
+    expect(fields).not.toHaveProperty('text');
+    expect(fields).not.toHaveProperty('key');
+    const same = applyRevision({ text: 'abate', key: 'abate', kind: 'word' }, { ...revision, text: ' abate ' });
+    expect(same).not.toHaveProperty('text');
+  });
+
+  it('응답이 비운 칸은 원래 값을 둔다 (발음·예문이 지워지지 않게)', () => {
+    const fields = applyRevision(
+      { text: 'abate', key: 'abate', kind: 'word', meaning: '줄다', pronunciation: '/əˈbeɪt/', example: 'The storm abated.\n→ 폭풍이 잦아들었다.' },
+      { ...revision, meaning: '약해지다', note: undefined }
+    );
+    expect(fields).toMatchObject({ meaning: '약해지다', pronunciation: '/əˈbeɪt/', example: 'The storm abated.\n→ 폭풍이 잦아들었다.', note: undefined });
+  });
+
+  it('답장 없는 수정은 24시간 안에 저장한 표현에만', () => {
+    const now = new Date('2026-10-17T09:14:00+09:00');
+    expect(isWithinCorrectionWindow('2026-10-17T00:13:00.000Z', now)).toBe(true);
+    expect(isWithinCorrectionWindow('2026-10-15T00:13:00.000Z', now)).toBe(false);
+    expect(isWithinCorrectionWindow(undefined, now)).toBe(false);
+    expect(isWithinCorrectionWindow('garbage', now)).toBe(false);
+  });
+
+  it('표현 자체를 고치면 key·kind도 같이 간다', () => {
+    const fields = applyRevision(
+      { text: 'the employment will commerce on Septemper 1', key: 'the employment will commerce on septemper 1', kind: 'sentence' },
+      { ...revision, text: 'The employment will commence on September 1.' }
+    );
+    expect(fields).toMatchObject({
+      text: 'The employment will commence on September 1.',
+      key: 'the employment will commence on september 1',
+      kind: 'sentence',
+    });
   });
 });
 
@@ -275,6 +354,12 @@ describe('Telegram 포맷', () => {
     expect(card).toContain('다음 복습 10/12');
   });
 
+  it('고친 카드는 ✏️ 머리말', () => {
+    const card = formatVocabCard(entry({ kind: 'sentence', meaning: '근무는 9월 1일에 시작된다' }), { repeated: false, corrected: true });
+    expect(card).toContain('✏️ <b>고쳤어요</b> · 문장');
+    expect(card).not.toContain('저장했어요');
+  });
+
   it('문장 카드는 "번역", 뜻이 비면 안내', () => {
     expect(formatVocabCard(entry({ kind: 'sentence', meaning: '번역문' }), { repeated: false })).toContain('번역: 번역문');
     expect(formatVocabCard(entry({ meaning: undefined }), { repeated: false })).toContain('뜻을 아직 못 채웠어요');
@@ -311,5 +396,19 @@ describe('Bedrock 단어 응답', () => {
   it('프롬프트에 사용자 뜻을 기준으로 넣는다', () => {
     expect(buildVocabPrompt('bank', 'word', '둑')).toContain('사용자가 적은 뜻');
     expect(buildVocabPrompt('bank', 'word')).not.toContain('사용자가 적은 뜻');
+  });
+
+  it('수정 프롬프트에 현재 카드와 요청이 들어가고, 응답의 text는 선택', () => {
+    const prompt = buildVocabRevisionPrompt(
+      entry({ kind: 'sentence', meaning: '고용은 9월 1일에 시작될 것이다', example: 'Work starts.\n→ 일이 시작된다.' }),
+      '근무가 시작된다는 뜻이야'
+    );
+    expect(prompt).toContain('고용은 9월 1일에 시작될 것이다');
+    expect(prompt).toContain('근무가 시작된다는 뜻이야');
+    expect(prompt).toContain('"example": "Work starts."');
+    expect(prompt).toContain('"exampleKo": "일이 시작된다."');
+    expect(parseVocabRevision('{"meaning":"근무는 9월 1일에 시작된다","synonyms":[]}')).toMatchObject({ meaning: '근무는 9월 1일에 시작된다', text: undefined });
+    expect(parseVocabRevision('{"text":"commence","meaning":"시작하다","synonyms":[]}').text).toBe('commence');
+    expect(() => parseVocabRevision('{"text":"commence","meaning":""}')).toThrow();
   });
 });

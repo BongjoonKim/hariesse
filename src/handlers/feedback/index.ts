@@ -9,7 +9,7 @@ import {
 } from '../../lib/dynamo';
 import { decodeCallback, feedbackEffects } from '../../domain/feedback';
 import { decodeLessonCallback, applyLessonFeedback, initialProgress } from '../../domain/learning';
-import { decodeVocabCallback, applyReview, kstDate } from '../../domain/vocab';
+import { decodeVocabCallback, pageIdFromReplyMarkup, applyReview, kstDate } from '../../domain/vocab';
 import { answerCallbackQuery, clearInlineKeyboard, sendReply } from '../../lib/telegram';
 import { upsertArticle } from '../../lib/notion';
 import { getVocabPage, updateVocabPage, archiveVocabPage } from '../../lib/notion-vocab';
@@ -23,6 +23,7 @@ import type { VocabEvent } from '../vocab';
  * - callback_query: 다이제스트(v1|) / 학습 레슨(l1|) / TOEFL 단어장(t1|) 버튼.
  * - message: 내 채팅(SSM telegram-chat-id)에서 온 것만 → TOEFL 단어장에 기록. Bedrock이 오래 걸리니
  *   Vocab Lambda를 비동기 호출하고 바로 200 (Telegram은 응답이 늦으면 같은 update를 재전송한다).
+ *   단어장 카드에 답장한 메시지면 그 카드의 page id를 같이 넘긴다 (뜻 수정 요청).
  * - 응답은 항상 200 (아니면 Telegram이 재시도 폭주).
  * - idempotency: 액션당 1회만 반영 (`${action}FeedbackAt` 마커, dynamo 조건부 update).
  */
@@ -48,6 +49,11 @@ interface TelegramUpdate {
   message?: TelegramMessageRef & {
     text?: string;
     from?: { is_bot?: boolean };
+    /** 답장이면 원본 메시지. 봇의 단어장 카드면 inline 키보드에 page id가 들어 있다. */
+    reply_to_message?: TelegramMessageRef & {
+      from?: { is_bot?: boolean };
+      reply_markup?: { inline_keyboard?: { callback_data?: string }[][] };
+    };
   };
 }
 
@@ -186,6 +192,8 @@ const VOCAB_HELP = [
   '<code>The findings corroborate the hypothesis.</code>',
   '<code>mitigate :: 완화하다 #reading</code>  ← 내가 아는 뜻(::)·태그(#)는 선택',
   '',
+  '뜻이 틀렸으면 그 카드에 <b>답장</b>으로, 또는 바로 한국어로 "~라는 뜻이야"라고 보내면 고쳐요 (답장이 없으면 마지막에 저장한 표현).',
+  '',
   '매일 21:00에 복습 퀴즈가 와요. 지금 복습하려면 /review',
 ].join('\n');
 
@@ -241,7 +249,8 @@ async function handleMessage(msg: NonNullable<TelegramUpdate['message']>): Promi
       }
       return;
     }
-    await invokeVocab({ type: 'capture', text, messageId: msg.message_id });
+    const replyToPageId = msg.reply_to_message?.from?.is_bot ? pageIdFromReplyMarkup(msg.reply_to_message.reply_markup) : undefined;
+    await invokeVocab({ type: 'capture', text, messageId: msg.message_id, ...(replyToPageId ? { replyToPageId } : {}) });
   } catch (err) {
     console.error(`vocab 호출 실패: ${(err as Error).message}`);
     await reply('⚠️ 단어장 처리를 시작하지 못했어요. 잠시 후 다시 보내 주세요.');
