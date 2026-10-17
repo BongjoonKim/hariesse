@@ -56,6 +56,7 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
   Bedrock이 빈 칸(뜻/번역·품사·예문·동의어·TOEFL 팁)을 채운다. 매일 21:00 KST에 복습 퀴즈(뜻은 스포일러)
   `[✅ 알아요][❌ 몰라요]` → Leitner 박스(1·3·7·14·30일). **원본 저장소는 Notion DB** (DynamoDB에 따로 두지 않음).
   뜻이 틀리면 카드에 **답장**하거나 답장 없이 한국어로 고쳐 달라고 하면(24시간 안 마지막 저장 표현) Bedrock이 카드를 다시 쓴다.
+  물음표 없이 보낸 의문문("who is going to lead the fundraiser")은 저장 때 `?`를 붙인다(`punctuateQuestion`, Telegram 입력만).
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 

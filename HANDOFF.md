@@ -52,6 +52,13 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
+> ❓ **2026-10-17 단어장 의문문 물음표 증분** (브랜치 `claude/community-fundraiser-lead-bc8421` → develop PR, Prod 미반영).
+> "who is going to lead the community fundraiser"처럼 물음표 없이 보낸 의문문은 저장 때 `?`를 붙인다 (`punctuateQuestion`, `src/domain/vocab.ts`, 순수함수).
+> - 판정은 보수적: 의문사(who/what/which/when/where/why/how…)로 시작하고 3단어 안에 조동사가 오거나(who's/what's·how come 포함),
+>   조동사(is/do/can/will…)로 시작하고 바로 주어(you/it/the…·대문자 고유명사)가 올 때만. "do away with"·"would rather"·"what if" 같은 숙어는 그대로.
+> - 적용 지점은 Telegram 메시지 파싱(`parseVocabMessage`)뿐. Notion에 직접 적은 제목은 건드리지 않는다(사용자가 쓴 칸은 덮지 않는 원칙).
+> - 짧은 의문문("is it", "who is he")은 `?`가 붙으면서 종류가 `sentence`로 바뀐다. dedup 키는 끝 문장부호를 지우므로 영향 없음.
+
 > ✏️ **2026-10-17 단어장 뜻 수정 증분** (브랜치 `claude/user-edit-translations-974de8` → develop PR, Prod 미반영).
 > 문제: 카드 번역이 어색해서 "고용이 아니라 근무가 시작된다는 뜻이야"라고 보냈더니 그 한국어 문장이 **새 표현으로 저장**됐다.
 > - 수정 요청 판별(`isCorrectionRequest`, 순수함수): 한글이 영문자보다 많은 메시지는 새 표현이 아니라 수정 요청. `표현 :: 뜻`·`#태그`는 세지 않는다.

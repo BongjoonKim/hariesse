@@ -5,6 +5,7 @@ import {
   normalizeVocabKey,
   detectKind,
   parseVocabMessage,
+  punctuateQuestion,
   fillFromEnrichment,
   initialReview,
   applyReview,
@@ -62,6 +63,37 @@ describe('입력 파싱', () => {
     expect(detectKind('The findings corroborate the hypothesis')).toBe('sentence');
     expect(detectKind('It works.')).toBe('sentence');
     expect(detectKind('Is it?')).toBe('sentence');
+  });
+
+  it('물음표 없는 의문문에 ? 를 붙인다', () => {
+    expect(punctuateQuestion('who is going to lead the community fundraiser')).toBe(
+      'who is going to lead the community fundraiser?'
+    );
+    expect(punctuateQuestion('What time is it')).toBe('What time is it?');
+    expect(punctuateQuestion('How many people are coming')).toBe('How many people are coming?');
+    expect(punctuateQuestion("What's the catch")).toBe("What's the catch?");
+    expect(punctuateQuestion('How come')).toBe('How come?');
+    expect(punctuateQuestion('Do you mind')).toBe('Do you mind?');
+    expect(punctuateQuestion('Did John leave early')).toBe('Did John leave early?');
+    expect(punctuateQuestion('is it')).toBe('is it?');
+  });
+
+  it('의문문이 아니거나 이미 문장부호가 있으면 그대로', () => {
+    expect(punctuateQuestion('Is it?')).toBe('Is it?');
+    expect(punctuateQuestion('Where there is a will, there is a way.')).toBe('Where there is a will, there is a way.');
+    expect(punctuateQuestion('do away with')).toBe('do away with');
+    expect(punctuateQuestion('would rather')).toBe('would rather');
+    expect(punctuateQuestion('can afford')).toBe('can afford');
+    expect(punctuateQuestion('what if')).toBe('what if');
+    expect(punctuateQuestion('how')).toBe('how');
+    expect(punctuateQuestion('The findings corroborate the hypothesis')).toBe('The findings corroborate the hypothesis');
+  });
+
+  it('파싱 때 의문문은 ? 가 붙고 문장으로 분류된다', () => {
+    expect(parseVocabMessage('who is he :: 그는 누구니 #speaking')).toEqual([
+      { text: 'who is he?', meaning: '그는 누구니', tags: ['speaking'], kind: 'sentence' },
+    ]);
+    expect(normalizeVocabKey('who is he?')).toBe('who is he');
   });
 
   it('한 줄 = 1건, 뜻(::)과 태그(#) 분리', () => {

@@ -64,13 +64,50 @@ export function normalizeVocabKey(text: string): string {
     .trim();
 }
 
+const WH_WORDS = new Set(['who', 'whom', 'whose', 'what', 'which', 'when', 'where', 'why', 'how']);
+const AUX_VERBS = new Set([
+  'is', 'are', 'am', 'was', 'were', 'do', 'does', 'did', 'can', 'could', 'will', 'would', 'shall', 'should',
+  'may', 'might', 'must', 'have', 'has', 'had',
+]);
+const SUBJECTS = new Set([
+  'i', 'you', 'he', 'she', 'it', 'we', 'they', 'this', 'that', 'these', 'those', 'there', 'the', 'a', 'an',
+  'my', 'your', 'his', 'her', 'its', 'our', 'their', 'anyone', 'anybody', 'someone', 'somebody', 'everyone',
+]);
+
+/**
+ * 문장부호 없이 보낸 의문문이면 끝에 `?`를 붙인다 ("who is going to lead the fundraiser" → "...fundraiser?").
+ * 의문문 판정은 보수적으로: 의문사로 시작하고 3단어 안에 조동사가 오거나(who's/what's 포함),
+ * 조동사로 시작하고 바로 주어가 오면("do you", "is it", "Did John"). 구동사·숙어("do away with", "would rather")는 건드리지 않는다.
+ * 이미 . ? ! 로 끝나면 그대로. 순수함수.
+ */
+export function punctuateQuestion(text: string): string {
+  const t = text.trim();
+  if (!t || /[.?!]["')\]]?$/.test(t)) return t;
+  const tokens = t.split(/\s+/);
+  if (tokens.length < 2) return t;
+  const lower = tokens.map((w) => w.toLowerCase().replace(/[‘’]/g, "'").replace(/^["'(\[]+|["')\],;:]+$/g, ''));
+  const [first, second] = lower;
+  const firstBase = first.replace(/'s$/, '');
+
+  let question = false;
+  if (WH_WORDS.has(firstBase)) {
+    question =
+      first !== firstBase || // who's / what's / how's
+      (first === 'how' && second === 'come') ||
+      lower.slice(1, 4).some((w) => AUX_VERBS.has(w));
+  } else if (AUX_VERBS.has(first)) {
+    question = SUBJECTS.has(second) || /^[A-Z]/.test(tokens[1]);
+  }
+  return question ? `${t}?` : t;
+}
+
 export function detectKind(text: string): VocabKind {
   const t = text.trim();
   if (/[.?!]["')\]]?$/.test(t)) return 'sentence';
   return t.split(/\s+/).length <= WORD_MAX_TOKENS ? 'word' : 'sentence';
 }
 
-/** 메시지 한 줄 → 표현 1건. 빈 줄은 무시, 최대 MAX_INPUTS_PER_MESSAGE건. */
+/** 메시지 한 줄 → 표현 1건. 빈 줄은 무시, 최대 MAX_INPUTS_PER_MESSAGE건. 물음표 없는 의문문은 `?`를 붙인다. */
 export function parseVocabMessage(message: string): VocabInput[] {
   const inputs: VocabInput[] = [];
   for (const rawLine of message.split(/\r?\n/)) {
@@ -84,7 +121,7 @@ export function parseVocabMessage(message: string): VocabInput[] {
     if (!line) continue;
 
     const sep = line.indexOf('::');
-    const text = (sep === -1 ? line : line.slice(0, sep)).trim();
+    const text = punctuateQuestion((sep === -1 ? line : line.slice(0, sep)).trim());
     const meaning = sep === -1 ? undefined : line.slice(sep + 2).trim() || undefined;
     if (!text) continue;
 
