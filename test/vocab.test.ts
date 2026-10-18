@@ -19,13 +19,20 @@ import {
   pageIdFromReplyMarkup,
   applyRevision,
   isWithinCorrectionWindow,
+  hasKoreanInstruction,
+  splitKoreanInstruction,
+  classifyVocabMessageLocally,
+  fallbackVocabIntent,
+  guessIntentFromInstruction,
+  joinClause,
+  appendToEntry,
   MAX_INPUTS_PER_MESSAGE,
   type ReviewFields,
   type VocabAction,
 } from '../src/domain/vocab';
 import { buildVocabProperties, parseVocabPage, VOCAB_PROP } from '../src/lib/notion-vocab';
 import { formatVocabCard, formatReviewItem, buildVocabSavedKeyboard, buildReviewKeyboard } from '../src/lib/telegram';
-import { parseVocabEnrichment, buildVocabPrompt, parseVocabRevision, buildVocabRevisionPrompt } from '../src/lib/bedrock';
+import { parseVocabEnrichment, buildVocabPrompt, parseVocabRevision, buildVocabRevisionPrompt, parseVocabIntent, buildVocabIntentPrompt } from '../src/lib/bedrock';
 import type { VocabEntry } from '../src/lib/types';
 
 const TODAY = '2026-10-11';
@@ -458,5 +465,115 @@ describe('Bedrock 단어 응답', () => {
     expect(parseVocabRevision('{"meaning":"근무는 9월 1일에 시작된다","synonyms":[]}')).toMatchObject({ meaning: '근무는 9월 1일에 시작된다', text: undefined });
     expect(parseVocabRevision('{"text":"commence","meaning":"시작하다","synonyms":[]}').text).toBe('commence');
     expect(() => parseVocabRevision('{"text":"commence","meaning":""}')).toThrow();
+  });
+});
+
+describe('의도 분류 (새 표현 / 수정 / 이어 붙이기)', () => {
+  const FIRST = 'that also happens to be our Wind & appetizer Special night';
+  const SECOND = '아까 문장에 추가로 which offers a 5 percent discout on all appetizers and select winds';
+
+  it('영어만 있으면 Bedrock 분류 없이 바로 저장(new) — 답장이면 수정(revise)', () => {
+    expect(classifyVocabMessageLocally(FIRST, false)).toEqual({ intent: 'new', english: FIRST });
+    expect(classifyVocabMessageLocally('mitigate :: 완화하다 #reading', false)).toEqual({ intent: 'new', english: 'mitigate :: 완화하다 #reading' });
+    expect(classifyVocabMessageLocally('it means to start', true)).toMatchObject({ intent: 'revise', instruction: 'it means to start' });
+    expect(hasKoreanInstruction(FIRST)).toBe(false);
+    expect(hasKoreanInstruction('take into account :: 고려하다\nabate :: 약해지다')).toBe(false);
+  });
+
+  it('한글이 영문보다 많으면 빠른 경로로 수정(revise)', () => {
+    const msg = '고용이라기 보다는 근무가 9/1일 부터 시작할 거라는 뜻이 맞을 것 같아 수정해줘';
+    expect(classifyVocabMessageLocally(msg, false)).toMatchObject({ intent: 'revise', instruction: msg });
+  });
+
+  it('한글이 섞여 있는데 영문이 더 많으면 Bedrock 분류로 넘긴다(undefined)', () => {
+    expect(hasKoreanInstruction(SECOND)).toBe(true);
+    expect(isCorrectionRequest(SECOND)).toBe(false);
+    expect(classifyVocabMessageLocally(SECOND, false)).toBeUndefined();
+  });
+
+  it('한국어 지시 접두어/접미어와 영어 본문을 나눈다', () => {
+    expect(splitKoreanInstruction(SECOND)).toEqual({
+      instruction: '아까 문장에 추가로',
+      english: 'which offers a 5 percent discout on all appetizers and select winds',
+    });
+    expect(splitKoreanInstruction('which offers a discount 를 앞 문장 뒤에 붙여줘')).toEqual({
+      instruction: '를 앞 문장 뒤에 붙여줘',
+      english: 'which offers a discount',
+    });
+    expect(splitKoreanInstruction('앞 문장에 이어서: and select wines')).toEqual({ instruction: '앞 문장에 이어서:', english: 'and select wines' });
+    expect(splitKoreanInstruction("commence는 '근무를 시작하다'로 번역해줘").english).toBe('');
+    expect(splitKoreanInstruction(FIRST)).toEqual({ instruction: '', english: FIRST });
+  });
+
+  it('Bedrock 분류가 실패하면 규칙으로 추정 — 한국어 접두어는 표현에 들어가지 않는다', () => {
+    expect(guessIntentFromInstruction('아까 문장에 추가로')).toBe('append');
+    expect(guessIntentFromInstruction('앞 문장 뒤에 붙여줘')).toBe('append');
+    expect(guessIntentFromInstruction('~라는 뜻이야')).toBe('revise');
+    expect(fallbackVocabIntent(SECOND)).toEqual({
+      intent: 'append',
+      english: 'which offers a 5 percent discout on all appetizers and select winds',
+      instruction: '아까 문장에 추가로',
+    });
+    expect(fallbackVocabIntent(FIRST)).toEqual({ intent: 'new', english: FIRST });
+  });
+
+  it('절을 이어 붙일 때 앞 문장의 마침표는 소문자/쉼표로 시작하는 절에서만 뗀다', () => {
+    expect(joinClause('The storm abated.', 'which surprised everyone')).toBe('The storm abated which surprised everyone');
+    expect(joinClause('The storm abated.', ', which surprised everyone')).toBe('The storm abated, which surprised everyone');
+    expect(joinClause('The storm abated.', 'Nobody expected it.')).toBe('The storm abated. Nobody expected it.');
+    expect(joinClause('abate', '')).toBe('abate');
+  });
+
+  it('스크린샷 사례: 20:36 저장 → 20:40 "아까 문장에 추가로 …" = 새 카드가 아니라 첫 카드에 이어 붙은 한 장', () => {
+    // 20:36 — 영어만 → 바로 저장
+    const first = classifyVocabMessageLocally(FIRST, false)!;
+    expect(first.intent).toBe('new');
+    const card = entry({ text: FIRST, key: normalizeVocabKey(FIRST), kind: 'sentence', meaning: '그것은 또한 우리의 와인 & 애피타이저 스페셜 나이트이기도 합니다' });
+
+    // 20:40 — 한글 섞임 → 로컬 판단 불가 → Bedrock 분류 결과(append)로 분기
+    expect(classifyVocabMessageLocally(SECOND, false)).toBeUndefined();
+    const decision = parseVocabIntent(
+      '{"intent":"append","english":"which offers a 5 percent discout on all appetizers and select winds","instruction":"아까 문장에 추가로"}'
+    );
+    expect(decision.intent).toBe('append');
+
+    const joined = appendToEntry(card, decision.english);
+    expect(joined.text).toBe(
+      'that also happens to be our Wind & appetizer Special night which offers a 5 percent discout on all appetizers and select winds'
+    );
+    expect(joined.key).toBe(normalizeVocabKey(joined.text));
+    expect(joined.key).not.toBe(card.key);
+    expect(joined.kind).toBe('sentence');
+    expect(joined.text).not.toMatch(/[가-힣]/);
+    // 카드는 같은 pageId 한 장 — 새 카드 생성 경로(parseVocabMessage)로 가지 않는다
+    expect({ ...card, ...joined }.pageId).toBe(PAGE_ID);
+  });
+});
+
+describe('Bedrock 의도 분류 응답', () => {
+  it('프롬프트에 마지막 카드와 메시지가 들어간다 (카드 없으면 "없음")', () => {
+    const prompt = buildVocabIntentPrompt('아까 문장에 추가로 which offers a discount', { text: 'our Special night', meaning: '스페셜 나이트' });
+    expect(prompt).toContain('"text": "our Special night"');
+    expect(prompt).toContain('아까 문장에 추가로 which offers a discount');
+    expect(buildVocabIntentPrompt('x')).toContain('마지막 카드: 없음');
+  });
+
+  it('intent 셋 중 하나가 아니면 throw, english에 남은 한국어는 떼어 낸다', () => {
+    expect(parseVocabIntent('{"intent":"new","english":"take into account","instruction":""}')).toEqual({
+      intent: 'new',
+      english: 'take into account',
+      instruction: undefined,
+    });
+    expect(parseVocabIntent('```json\n{"intent":"revise","english":"","instruction":"근무가 시작된다는 뜻이야"}\n```')).toMatchObject({
+      intent: 'revise',
+      instruction: '근무가 시작된다는 뜻이야',
+    });
+    // LLM이 지시를 english에 같이 넣어도 표현에는 한국어가 섞이지 않는다
+    expect(parseVocabIntent('{"intent":"append","english":"아까 문장에 추가로 which offers a discount","instruction":""}')).toEqual({
+      intent: 'append',
+      english: 'which offers a discount',
+      instruction: '아까 문장에 추가로',
+    });
+    expect(() => parseVocabIntent('{"intent":"delete","english":"x"}')).toThrow();
   });
 });

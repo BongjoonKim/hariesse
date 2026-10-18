@@ -11,6 +11,8 @@
 > **2026-10-11 TOEFL 단어장 증분: Telegram/Notion에 적으면 뜻 채우고 매일 21:00 KST 간격 반복 복습 — 2026-10-11 배포 (HANDOFF 맨 위 블록).**
 > **2026-10-17 단어장 뜻 수정: 카드에 답장하거나 한국어로 "~라는 뜻이야"라고 보내면 새 표현 대신 그 카드를 고친다 — 2026-10-17 배포 완료.**
 > **2026-10-18 단어장 철자 자동 교정: 오타가 있으면 고친 철자로 저장하고 메모 맨 앞에 원래 입력을 남긴다 — develop PR, Prod 미반영.**
+> **2026-10-18 단어장 의도 분류: 한글이 섞인 메시지는 새 표현/수정/이어 붙이기(append)로 Bedrock이 분류하고, "아까 문장에 추가로 …"는 마지막 카드에 이어 붙인다 — develop PR(철자 교정 PR #13 포함), Prod 미반영.**
+> **⚠️ 작업이 끝나면 반드시 push + develop PR까지. 미머지 PR이 있으면 먼저 확인(2026-10-18, PR #13이 머지 안 된 채 #14가 배포된 사례).**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자 — 10/10 배포, 10/16 develop에 합침.**
 > **다음 증분은 Phase 2 개인화(가중치 학습 슬롯 반영, isNovel 실제 신호) — HANDOFF §7 로드맵 참고.**
@@ -119,6 +121,9 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
   webhook `allowed_updates`에 `message`가 있어야 메시지가 온다.
 - **단어장 enrich는 빈 칸만 채운다**: 사용자가 Notion에 적은 뜻·예문을 Bedrock 결과로 덮지 말 것 (`fillFromEnrichment`).
   예외는 사용자가 직접 보낸 **수정 요청**(`applyRevision`) — 그때만 채워진 칸을 덮는다. 한글이 영문보다 많은 메시지는 새 표현으로 저장하지 않는다(`isCorrectionRequest`).
+- **단어장 의도 분류는 한글이 섞였을 때만**: 영어만 있는 메시지는 Bedrock 분류 없이 바로 저장한다(비용·지연 유지). 한글>영문이면 revise 빠른 경로,
+  그 사이만 `classifyVocabMessage`. 분류 결과의 `english`는 `splitKoreanInstruction`으로 한 번 더 걸러 **한국어 지시가 표현에 섞여 저장되지 않게** 한다.
+  append는 표현·키·종류를 코드(`appendToEntry`)가 정하고 Bedrock은 번역·예문만 다시 쓴다.
 - **단어장 철자 교정은 표현에 반영한다**: Bedrock 응답 `correctedText`가 있으면 고친 철자로 저장하고 메모 맨 앞에 원래 입력을 남긴다(`detectSpellingCorrection`).
   dedup 키가 같은 차이(대소문자·문장부호)는 교정이 아니다. 고친 철자가 이미 있는 표현이면 새 행을 만들지 말고 그 카드의 헷갈린 횟수 +1.
 - **VocabFn 비동기 재시도 0회**: capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다.
