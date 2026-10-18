@@ -278,11 +278,13 @@ function vocabDetailLines(entry: VocabEntry): string[] {
   return lines;
 }
 
-/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄, corrected = 수정 요청을 반영함. 순수함수. */
-export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean; corrected?: boolean }): string {
+/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄, corrected = 수정 요청을 반영함, appended = 표현 뒤에 절을 이어 붙임. 순수함수. */
+export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean; corrected?: boolean; appended?: boolean }): string {
   const kind = entry.kind ? KIND_LABEL[entry.kind] : '표현';
   const lines = [
-    opts.corrected
+    opts.appended
+      ? `➕ <b>이어 붙였어요</b> · ${kind}`
+      : opts.corrected
       ? `✏️ <b>고쳤어요</b> · ${kind}`
       : opts.repeated
         ? `📌 <b>이미 있는 ${kind}예요</b> · 헷갈린 횟수 ${entry.missCount}`

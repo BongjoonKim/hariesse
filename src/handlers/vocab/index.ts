@@ -1,6 +1,6 @@
 import { getConfig, getTelegramBotToken, getNotionToken, type AppConfig } from '../../lib/config';
 import { getVocabReviewState, updateVocabReviewState } from '../../lib/dynamo';
-import { enrichVocab, reviseVocab } from '../../lib/bedrock';
+import { enrichVocab, reviseVocab, classifyVocabMessage } from '../../lib/bedrock';
 import {
   findVocabByKey,
   getVocabPage,
@@ -31,7 +31,9 @@ import {
   initialReview,
   applyRepeatCapture,
   applyRevision,
-  isCorrectionRequest,
+  classifyVocabMessageLocally,
+  fallbackVocabIntent,
+  appendToEntry,
   isWithinCorrectionWindow,
   pickDueEntries,
   needsEnrichment,
@@ -39,7 +41,7 @@ import {
   type EnrichedFields,
 } from '../../domain/vocab';
 import { DEFAULTS } from '../../lib/constants';
-import type { VocabEntry, VocabKind } from '../../lib/types';
+import type { VocabEntry, VocabIntentResult, VocabKind } from '../../lib/types';
 
 /**
  * TOEFL 단어장 Lambda. 원본 저장소는 Notion "TOEFL Vocab" DB.
@@ -47,6 +49,10 @@ import type { VocabEntry, VocabKind } from '../../lib/types';
  *   한 줄 = 표현 1건 → 뜻·번역 채워서 Notion에 저장 → 카드로 답장. 이미 있는 표현이면 헷갈린 횟수 +1.
  * - 수정: 카드(저장·복습 메시지)에 답장으로 쓰거나, 답장 없이 한국어로 "~라는 뜻이야"라고 보내면
  *   그 표현(답장 없으면 마지막으로 저장한 표현)의 카드를 요청대로 다시 쓴다. 새 표현으로 저장하지 않는다.
+ * - 의도 분류: 한글이 섞인 메시지는 새 표현(new) / 수정(revise) / 마지막 카드에 이어 붙이기(append) 중 하나다.
+ *   한글이 영문보다 많으면 revise 빠른 경로, 영어만이면 분류 없이 바로 저장(Bedrock 호출 수 그대로),
+ *   그 사이("아까 문장에 추가로 which offers …")만 Bedrock 분류(`classifyVocabMessage`)를 거친다.
+ *   append는 대상 카드의 표현을 "기존 + 새 절"로 합치고 키를 다시 계산한 뒤 번역·예문을 다시 쓴다 (복습 상태 유지).
  * - review: 매일 21:00 KST (EventBridge) 또는 /review 명령.
  *   ① Notion에 직접 넣은 행 등 뜻이 빈 행을 채우고 ② 복습할 차례인 표현을 퀴즈로 보낸다.
  *   정기 실행은 같은 KST 날짜에 1번만 (Profile 테이블 pk='VOCAB'). `{"type":"review","force":true}`는 언제든.
@@ -70,6 +76,7 @@ interface VocabResult {
   saved?: number;
   repeated?: number;
   corrected?: number;
+  appended?: number;
   failed?: number;
   enriched?: number;
   sent?: number;
@@ -86,7 +93,7 @@ export const handler = async (event: VocabEvent = {}): Promise<VocabResult> => {
 
 async function capture(cfg: AppConfig, text: string, messageId?: number, replyToPageId?: string): Promise<VocabResult> {
   const botToken = await getTelegramBotToken();
-  const result: VocabResult = { type: 'capture', saved: 0, repeated: 0, corrected: 0, failed: 0 };
+  const result: VocabResult = { type: 'capture', saved: 0, repeated: 0, corrected: 0, appended: 0, failed: 0 };
   if (!cfg.vocabNotionDatabaseId) {
     await sendReply(botToken, cfg.telegramChatId, '⚠️ 단어장 Notion DB가 아직 설정되지 않았어요.', messageId);
     return { ...result, reason: 'no-database' };
@@ -94,25 +101,41 @@ async function capture(cfg: AppConfig, text: string, messageId?: number, replyTo
   const notionToken = await getNotionToken();
   const today = kstDate();
 
-  // 카드에 답장했거나 한국어로 말했으면 새 표현이 아니라 수정 요청이다
-  if (replyToPageId || isCorrectionRequest(text)) {
-    let targetPageId = replyToPageId;
+  // 의도: 영어만 → 바로 저장(답장이면 수정). 한글이 섞였으면 빠른 경로(한글>영문 = 수정) 아니면 Bedrock 분류.
+  let decision = classifyVocabMessageLocally(text, Boolean(replyToPageId));
+  // 수정·이어 붙이기 대상: 답장한 카드, 아니면 24시간 안에 마지막으로 저장·수정한 표현
+  let targetPageId = replyToPageId;
+  let target: VocabEntry | undefined;
+  if (!decision || decision.intent !== 'new') {
     if (!targetPageId) {
       const state = await getVocabReviewState(cfg.profileTable);
       if (isWithinCorrectionWindow(state?.lastCaptureAt)) targetPageId = state?.lastCapturePageId;
     }
-    if (!targetPageId) {
-      await sendReply(botToken, cfg.telegramChatId, VOCAB_CORRECTION_TARGET_MISSING, messageId);
+    if (targetPageId) target = (await getVocabPage(notionToken, targetPageId)) ?? undefined;
+  }
+  if (!decision) decision = await classify(cfg, text, target);
+
+  if (decision.intent !== 'new') {
+    if (!targetPageId || !target) {
+      await sendReply(
+        botToken,
+        cfg.telegramChatId,
+        target === undefined && targetPageId ? '✏️ 고치려는 표현이 이미 삭제됐어요.' : VOCAB_CORRECTION_TARGET_MISSING,
+        messageId
+      );
       return { ...result, reason: 'no-correction-target' };
     }
-    const ok = await correct(cfg, notionToken, botToken, targetPageId, text, messageId);
-    if (ok) result.corrected!++;
+    const ok =
+      decision.intent === 'append'
+        ? await append(cfg, notionToken, botToken, target, decision, messageId)
+        : await correct(cfg, notionToken, botToken, target, decision.instruction || text, messageId);
+    if (ok) result[decision.intent === 'append' ? 'appended' : 'corrected']!++;
     else result.failed!++;
     return result;
   }
 
   let lastPageId: string | undefined;
-  for (const input of parseVocabMessage(text)) {
+  for (const input of parseVocabMessage(decision.english)) {
     try {
       const key = normalizeVocabKey(input.text);
       const existing = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, key);
@@ -169,6 +192,72 @@ async function capture(cfg: AppConfig, text: string, messageId?: number, replyTo
   return result;
 }
 
+/**
+ * 한글이 섞인 메시지의 의도를 Bedrock에 묻는다. 실패하면 접두어를 떼어 내는 규칙 기반 추정으로 대신한다 —
+ * 어느 쪽이든 한국어 지시가 표현 텍스트에 섞여 저장되지는 않는다.
+ */
+async function classify(cfg: AppConfig, text: string, target: VocabEntry | undefined): Promise<VocabIntentResult> {
+  try {
+    const decision = await classifyVocabMessage(cfg.bedrockModelId, cfg.bedrockRegion, text, target);
+    console.log(`vocab intent: ${decision.intent} (bedrock) english="${decision.english.slice(0, 60)}"`);
+    return decision;
+  } catch (err) {
+    const decision = fallbackVocabIntent(text);
+    console.warn(`vocab 의도 분류 실패 → 규칙 추정 ${decision.intent}: ${(err as Error).message}`);
+    return decision;
+  }
+}
+
+/**
+ * 이어 붙이기: 대상 카드의 표현 뒤에 영어 절을 붙여 한 문장으로 만들고, 바뀐 문장에 맞춰 번역·예문·핵심 표현을 다시 쓴다.
+ * 표현·키·종류는 코드가 정하고(Bedrock이 철자를 고치지 않게), 복습 상태는 건드리지 않는다.
+ */
+async function append(
+  cfg: AppConfig,
+  notionToken: string,
+  botToken: string,
+  entry: VocabEntry,
+  decision: VocabIntentResult,
+  messageId?: number
+): Promise<boolean> {
+  const clause = decision.english.trim();
+  try {
+    if (!clause) {
+      await sendReply(botToken, cfg.telegramChatId, '➕ 이어 붙일 영어 문장을 찾지 못했어요. 영어 부분을 같이 보내 주세요.', messageId);
+      return false;
+    }
+    const joined = appendToEntry(entry, clause);
+    if (joined.key === entry.key) {
+      await sendReply(botToken, cfg.telegramChatId, '➕ 이미 그 문장이 들어 있어요.', messageId);
+      return false;
+    }
+    const clash = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, joined.key);
+    if (clash && clash.pageId !== entry.pageId) {
+      await sendReply(botToken, cfg.telegramChatId, '➕ 이어 붙인 문장이 이미 다른 카드로 있어요.', messageId);
+      return false;
+    }
+    const instruction = `표현 뒤에 "${clause}"를 이어 붙여 한 문장이 됐다${
+      decision.instruction ? ` (사용자 요청: ${decision.instruction})` : ''
+    }. 바뀐 전체 문장에 맞춰 번역·예문·핵심 표현을 다시 써라. text는 그대로 두라.`;
+    const revision = await reviseVocab(cfg.bedrockModelId, cfg.bedrockRegion, { ...entry, ...joined }, instruction);
+    const fields = { ...applyRevision({ ...entry, ...joined }, revision), ...joined };
+    await updateVocabPage(notionToken, entry.pageId, fields);
+    await rememberLastCapture(cfg, entry.pageId);
+    const card = formatVocabCard({ ...entry, ...fields }, { repeated: false, appended: true });
+    await sendReply(botToken, cfg.telegramChatId, card, messageId, buildVocabSavedKeyboard(entry.pageId));
+    console.log(`vocab append: ${entry.pageId} +"${clause.slice(0, 40)}"`);
+    return true;
+  } catch (err) {
+    console.error(`vocab append 실패 ${entry.pageId}: ${(err as Error).message}`);
+    try {
+      await sendReply(botToken, cfg.telegramChatId, formatVocabError(clause, (err as Error).message), messageId);
+    } catch (replyErr) {
+      console.warn(`실패 안내 전송 실패: ${(replyErr as Error).message}`);
+    }
+    return false;
+  }
+}
+
 /** 답장 없이 온 한국어 수정 요청이 향할 표현. 실패해도 저장은 끝난 뒤라 경고만. */
 async function rememberLastCapture(cfg: AppConfig, pageId: string): Promise<void> {
   try {
@@ -187,16 +276,12 @@ async function correct(
   cfg: AppConfig,
   notionToken: string,
   botToken: string,
-  pageId: string,
+  entry: VocabEntry,
   instruction: string,
   messageId?: number
 ): Promise<boolean> {
+  const { pageId } = entry;
   try {
-    const entry = await getVocabPage(notionToken, pageId);
-    if (!entry) {
-      await sendReply(botToken, cfg.telegramChatId, '✏️ 고치려는 표현이 이미 삭제됐어요.', messageId);
-      return false;
-    }
     const revision = await reviseVocab(cfg.bedrockModelId, cfg.bedrockRegion, entry, instruction);
     const fields = applyRevision(entry, revision);
     if (fields.key && fields.key !== entry.key) {

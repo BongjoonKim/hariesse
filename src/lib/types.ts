@@ -109,6 +109,20 @@ export interface VocabRevision extends VocabEnrichment {
   text?: string;
 }
 
+/**
+ * 한국어가 섞인 단어장 메시지의 의도.
+ * new = 새 표현 저장 / revise = 마지막(답장) 카드의 뜻·예문 수정 / append = 마지막(답장) 카드의 표현 뒤에 영어 절을 이어 붙임.
+ */
+export type VocabIntent = 'new' | 'revise' | 'append';
+
+export interface VocabIntentResult {
+  intent: VocabIntent;
+  /** 한국어 지시를 뺀 영어 본문. new면 저장할 표현, append면 이어 붙일 절. revise면 비어 있을 수 있다. */
+  english: string;
+  /** 한국어 지시 부분 (revise/append의 요청 내용). */
+  instruction?: string;
+}
+
 /** Notion "TOEFL Vocab" DB 한 행. Notion이 원본 저장소다. */
 export interface VocabEntry {
   /** Notion page id (하이픈 없는 32자) */

@@ -1,4 +1,4 @@
-import type { VocabEnrichment, VocabEntry, VocabKind, VocabRevision, VocabStatus } from '../lib/types';
+import type { VocabEnrichment, VocabEntry, VocabIntent, VocabIntentResult, VocabKind, VocabRevision, VocabStatus } from '../lib/types';
 
 /**
  * TOEFL 단어장 도메인 로직 (순수함수, 테스트 대상).
@@ -104,13 +104,94 @@ export type EnrichedFields = Pick<VocabEntry, 'meaning' | 'pos' | 'pronunciation
  * 영어 학습 자료만 저장하는 단어장이라 한국어 문장을 새 표현으로 저장할 일은 없다.
  */
 export function isCorrectionRequest(message: string): boolean {
-  const body = message
-    .split(/\r?\n/)
-    .map((line) => (line.includes('::') ? line.slice(0, line.indexOf('::')) : line).replace(TAG_RE, '$1'))
-    .join('\n');
+  const body = instructionBody(message);
   const hangul = (body.match(/[\uac00-\ud7a3]/g) ?? []).length;
   const latin = (body.match(/[A-Za-z]/g) ?? []).length;
   return hangul > 0 && hangul > latin;
+}
+
+// ---------------------------------------------------------------- 의도 분류 (새 표현 / 수정 / 이어 붙이기)
+
+const HANGUL_RE = /[\uac00-\ud7a3]/;
+
+/** `표현 :: 뜻`의 뜻 부분과 #태그를 뺀 본문. 한글 판별은 이 본문으로만 한다. */
+function instructionBody(message: string): string {
+  return message
+    .split(/\r?\n/)
+    .map((line) => (line.includes('::') ? line.slice(0, line.indexOf('::')) : line).replace(TAG_RE, '$1'))
+    .join('\n');
+}
+
+/** 본문에 한글이 하나라도 있으면 영어 입력이 아니라 지시가 섞인 메시지다 → Bedrock 분류 대상. */
+export function hasKoreanInstruction(message: string): boolean {
+  return HANGUL_RE.test(instructionBody(message));
+}
+
+/**
+ * 한국어 지시 접두어/접미어와 영어 본문을 나눈다. 순수함수.
+ * "아까 문장에 추가로 which offers a discount" → { instruction: "아까 문장에 추가로", english: "which offers a discount" }
+ * 한글이 든 토큰(조사가 붙은 "commence는" 포함)과 그에 붙은 문장부호만 지시로 보고, 양 끝에서만 떼어낸다 —
+ * 영어 본문 가운데 낀 한국어는 본문에 남겨 두어 LLM 분류가 보게 한다.
+ */
+export function splitKoreanInstruction(message: string): { instruction: string; english: string } {
+  const tokens = instructionBody(message).trim().split(/\s+/).filter(Boolean);
+  const isInstructionToken = (t: string) => HANGUL_RE.test(t) || !/[A-Za-z0-9]/.test(t);
+  let start = 0;
+  while (start < tokens.length && isInstructionToken(tokens[start])) start++;
+  let end = tokens.length;
+  while (end > start && isInstructionToken(tokens[end - 1])) end--;
+  const lead = tokens.slice(0, start);
+  const tail = tokens.slice(end);
+  return {
+    instruction: [...lead, ...tail].join(' ').trim(),
+    english: tokens.slice(start, end).join(' ').trim(),
+  };
+}
+
+/** 한국어 지시만 보고 의도를 추정한다 — Bedrock 분류가 실패했을 때의 대비책. "추가/이어/붙여/뒤에" 계열이면 append. */
+export function guessIntentFromInstruction(instruction: string): Exclude<VocabIntent, 'new'> {
+  return /추가|이어|붙|덧붙|뒤에|다음에/.test(instruction) ? 'append' : 'revise';
+}
+
+/**
+ * Bedrock 없이 결정할 수 있는 의도. 순수함수.
+ * - 한글이 없으면 지금처럼 바로 저장(new) — 답장이면 영어로 쓴 수정 요청(revise). Bedrock 분류 호출 없음.
+ * - 한글이 영문보다 많으면(isCorrectionRequest) 수정 요청(revise) 빠른 경로.
+ * - 한글이 섞여 있는데 영문이 더 많으면("아까 문장에 추가로 which offers …") undefined → Bedrock 분류로 넘긴다.
+ */
+export function classifyVocabMessageLocally(message: string, isReply: boolean): VocabIntentResult | undefined {
+  if (!hasKoreanInstruction(message)) {
+    return isReply ? { intent: 'revise', english: '', instruction: message } : { intent: 'new', english: message };
+  }
+  if (isCorrectionRequest(message)) return { intent: 'revise', english: '', instruction: message };
+  return undefined;
+}
+
+/** Bedrock 분류가 실패했을 때: 접두어를 떼어 내고 지시어로 의도를 추정한다. 한국어 접두어가 표현에 섞여 저장되는 일은 없게. */
+export function fallbackVocabIntent(message: string): VocabIntentResult {
+  const { instruction, english } = splitKoreanInstruction(message);
+  if (!instruction) return { intent: 'new', english };
+  return { intent: guessIntentFromInstruction(instruction), english, instruction };
+}
+
+/** 영어 본문 뒤에 절을 이어 붙인다. 앞 문장의 마침표는 절이 소문자/쉼표로 시작할 때만 뗀다. */
+export function joinClause(base: string, clause: string): string {
+  const b = base.trimEnd();
+  const c = clause.trim();
+  if (!c) return b;
+  if (!b) return c;
+  if (/^[,;:]/.test(c)) return b.replace(/[.!?]+$/, '') + c;
+  if (/^[a-z]/.test(c)) return `${b.replace(/[.!?]+$/, '')} ${c}`;
+  return `${b} ${c}`;
+}
+
+/** 카드의 표현에 절을 이어 붙인 결과 — text·key·kind 모두 다시 계산. 복습 상태는 건드리지 않는다. 순수함수. */
+export function appendToEntry(
+  entry: Pick<VocabEntry, 'text'>,
+  clause: string
+): Pick<VocabEntry, 'text' | 'kind'> & { key: string } {
+  const text = joinClause(entry.text, clause);
+  return { text, key: normalizeVocabKey(text), kind: detectKind(text) };
 }
 
 /** Telegram 메시지의 inline 키보드(답장 대상 카드)에서 단어장 page id를 찾는다. 없으면 undefined. */
