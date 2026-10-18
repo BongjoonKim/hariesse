@@ -278,8 +278,14 @@ function vocabDetailLines(entry: VocabEntry): string[] {
   return lines;
 }
 
-/** 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄, corrected = 수정 요청을 반영함, appended = 표현 뒤에 절을 이어 붙임. 순수함수. */
-export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean; corrected?: boolean; appended?: boolean }): string {
+/**
+ * 저장 확인 카드. repeated = 이미 있던 표현을 또 보냄, corrected = 수정 요청을 반영함, appended = 표현 뒤에 절을 이어 붙임,
+ * spelling = 철자를 고쳐 저장했다는 안내 한 줄("✏️ 철자 교정: winds → wines" — 전송 시점 안내일 뿐 Notion엔 없다). 순수함수.
+ */
+export function formatVocabCard(
+  entry: VocabEntry,
+  opts: { repeated: boolean; corrected?: boolean; appended?: boolean; spelling?: string }
+): string {
   const kind = entry.kind ? KIND_LABEL[entry.kind] : '표현';
   const lines = [
     opts.appended
@@ -290,6 +296,7 @@ export function formatVocabCard(entry: VocabEntry, opts: { repeated: boolean; co
         ? `📌 <b>이미 있는 ${kind}예요</b> · 헷갈린 횟수 ${entry.missCount}`
         : `📝 <b>저장했어요</b> · ${kind}`,
     vocabHeadline(entry),
+    ...(opts.spelling ? [escapeHtml(opts.spelling)] : []),
     ...vocabDetailLines(entry),
   ];
   if (!entry.meaning) lines.push('⚠️ 뜻을 아직 못 채웠어요. 다음 복습 때 다시 채울게요.');

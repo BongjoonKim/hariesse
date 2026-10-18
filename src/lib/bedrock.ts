@@ -213,8 +213,10 @@ const VOCAB_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 사용�
   note = 자주 같이 쓰는 표현(콜로케이션)이나 헷갈리기 쉬운 점 1~2문장.
 - 문장이면: meaning = 자연스러운 한국어 번역, pos·pronunciation·example은 빈 문자열, synonyms = [],
   note = 문장 속 핵심 단어·표현 2~4개를 "표현: 뜻" 형식으로 한 줄씩.
-- 입력에 오타가 있으면 correctedText에 철자만 고친 표현 전체를 넣어라 (예: "everiything" → "everything").
-  단어 선택·문법·대소문자·문장부호는 바꾸지 말고 철자만 고친다. 고칠 게 없으면 correctedText는 빈 문자열.
+- 입력에 **확실한** 오타가 있으면 correctedText에 철자만 고친 표현 전체를 넣어라 (예: "everiything" → "everything",
+  문맥상 "appetizers and select winds" → "wines", "discout" → "discount").
+  단어 선택·문법·대소문자·문장부호는 바꾸지 말고 철자만 고친다. 고유명사·구어체·줄임말·일부러 그렇게 쓴 표기는 교정하지 않는다.
+  확신이 없으면 고치지 않는다. 고칠 게 없으면 correctedText는 빈 문자열.
   meaning·example·note는 고친 표현을 기준으로 쓰고, note에 철자 얘기는 쓰지 마라 (카드가 따로 표시한다).
 - 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
 {"correctedText": "<철자를 고친 표현 또는 빈 문자열>", "meaning": "<뜻 또는 번역>", "pos": "<noun|verb|adjective|adverb|phrase|idiom|...>",
@@ -254,7 +256,9 @@ const VOCAB_REVISE_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 
 - 사용자의 요청이 최우선이다. 사용자가 말한 뜻·뉘앙스·문맥이 사전적 의미와 달라 보여도 사용자의 해석을 따른다.
 - 요청과 상관없는 칸은 원래 값을 그대로 둔다. 요청으로 뜻이 바뀌어 다른 칸(예문·메모·핵심 표현)이 틀리게 되면 그 칸만 맞춰 고친다.
 - 뜻·번역·설명은 한국어로. 형식은 원래 카드와 같게 (단어: meaning 1~3개 / 문장: meaning = 번역, note = "표현: 뜻" 한 줄씩).
-- 사용자가 표현 자체의 철자·단어를 고쳐 달라고 했을 때만 text를 고친 표현으로 채우고, 아니면 text는 원래 표현 그대로.
+- text: 사용자가 표현 자체의 철자·단어를 고쳐 달라고 했으면 그대로 반영한다. 요청이 없어도 표현에 **확실한** 오타가 있으면
+  (예: "discout" → "discount", 문맥상 "select winds" → "wines") 철자만 고쳐 text에 넣는다. 그 밖에는 text는 원래 표현 그대로.
+  단어 선택·문법·대소문자·문장부호는 바꾸지 말고, 고유명사·구어체·일부러 그렇게 쓴 표기는 교정하지 않는다. note에 철자 얘기는 쓰지 마라.
 - 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
 {"text": "<표현>", "meaning": "<뜻 또는 번역>", "pos": "<품사 또는 빈 문자열>", "pronunciation": "<IPA 또는 빈 문자열>",
  "example": "<영어 예문 또는 빈 문자열>", "exampleKo": "<예문 번역 또는 빈 문자열>", "synonyms": ["<동의어>", ...], "note": "<팁 또는 핵심 표현>"}`;

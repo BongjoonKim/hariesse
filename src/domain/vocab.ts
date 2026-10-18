@@ -103,16 +103,16 @@ export interface SpellingCorrection {
   text: string;
   key: string;
   kind: VocabKind;
-  /** 메모 맨 앞에 남길 원래 입력 기록 */
-  noteLine: string;
+  /** Telegram 카드에 한 줄로 보여줄 안내 — Notion에는 저장하지 않는다 (원문은 어디에도 남기지 않기로 함, 2026-10-18). */
+  label: string;
 }
 
 const SPELLING_NOTE_RE = /^철자 확인:[^\n]*\n?/;
 
 /**
  * Bedrock이 철자를 고쳐 줬으면(correctedText) 그 표현으로 저장하기 위한 값. 순수함수.
- * 대소문자·문장부호만 다른 건(dedup 키가 같은 건) 교정으로 치지 않고 사용자가 쓴 그대로 둔다.
- * 단어 수가 같으면 바뀐 단어만 "원래 → 고침"으로, 다르면 원래 입력 전체를 메모에 남긴다.
+ * 대소문자·문장부호만 다른 건(단어별 dedup 키가 전부 같은 건) 교정으로 치지 않고 사용자가 쓴 그대로 둔다.
+ * 단어 수가 같으면 바뀐 단어만 "원래 → 고침"으로, 다르면("alot" → "a lot") 전체를 라벨에 쓴다.
  */
 export function detectSpellingCorrection(original: string, e: Pick<VocabEnrichment, 'correctedText'>): SpellingCorrection | undefined {
   const text = e.correctedText?.trim();
@@ -122,19 +122,30 @@ export function detectSpellingCorrection(original: string, e: Pick<VocabEnrichme
 
   const before = original.trim().split(/\s+/);
   const after = text.split(/\s+/);
-  const changed = before.length === after.length
+  const sameLength = before.length === after.length;
+  const changed = sameLength
     ? before.map((w, i) => [w, after[i]] as const).filter(([a, b]) => normalizeVocabKey(a) !== normalizeVocabKey(b))
     : [];
-  const noteLine = changed.length
+  // 단어 수가 같은데 바뀐 단어가 없다 = 문장부호·대소문자만 다름 → 교정 아님
+  if (sameLength && changed.length === 0) return undefined;
+  const label = changed.length
     ? `✏️ 철자 교정: ${changed.map(([a, b]) => `${a} → ${b}`).join(', ')}`
-    : `✏️ 철자 교정 · 원래 입력: ${original.trim()}`;
-  return { text, key, kind: detectKind(text), noteLine };
+    : `✏️ 철자 교정: ${original.trim()} → ${text}`;
+  return { text, key, kind: detectKind(text), label };
 }
 
-/** 교정 기록을 메모 맨 앞에 붙인다. 모델이 예전 형식대로 쓴 "철자 확인:" 줄은 중복이라 뺀다. 순수함수. */
-export function withSpellingNote(note: string | undefined, correction: SpellingCorrection): string {
+/** 모델이 예전 형식대로 메모에 쓴 "철자 확인:" 줄은 뺀다 — 교정 기록은 Notion에 남기지 않는다. 순수함수. */
+export function stripSpellingNote(note: string | undefined): string | undefined {
   const rest = (note ?? '').replace(SPELLING_NOTE_RE, '').trim();
-  return rest ? `${correction.noteLine}\n${rest}` : correction.noteLine;
+  return rest || undefined;
+}
+
+/**
+ * 수정·이어 붙이기 결과(revision)의 text가 사용자가 친 표현과 철자만 다르면 교정으로 본다.
+ * 결과 필드는 그대로 두고(text·key·kind는 applyRevision이 이미 채움) 카드에 보여줄 라벨만 돌려준다. 순수함수.
+ */
+export function spellingOfRevision(typedText: string, fields: Pick<RevisedFields, 'text'>): SpellingCorrection | undefined {
+  return fields.text ? detectSpellingCorrection(typedText, { correctedText: fields.text }) : undefined;
 }
 
 // ---------------------------------------------------------------- 수정 요청 판별

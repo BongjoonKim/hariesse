@@ -7,7 +7,8 @@ import {
   parseVocabMessage,
   fillFromEnrichment,
   detectSpellingCorrection,
-  withSpellingNote,
+  stripSpellingNote,
+  spellingOfRevision,
   initialReview,
   applyReview,
   applyRepeatCapture,
@@ -206,23 +207,22 @@ describe('철자 교정', () => {
   const sentence = "send them to me as soon as they're done and i'll get everiything edited";
   const fixed = "send them to me as soon as they're done and i'll get everything edited";
 
-  it('오타가 있으면 고친 표현·키·종류와 바뀐 단어 기록을 돌려준다', () => {
+  it('오타가 있으면 고친 표현·키·종류와 카드용 라벨을 돌려준다 (원문은 저장하지 않는다)', () => {
     const c = detectSpellingCorrection(sentence, { correctedText: fixed });
     expect(c).toEqual({
       text: fixed,
       key: normalizeVocabKey(fixed),
       kind: 'sentence',
-      noteLine: '✏️ 철자 교정: everiything → everything',
+      label: '✏️ 철자 교정: everiything → everything',
     });
-    expect(detectSpellingCorrection('ubiquitious', { correctedText: 'ubiquitous' })?.noteLine).toBe(
-      '✏️ 철자 교정: ubiquitious → ubiquitous'
-    );
+    expect(detectSpellingCorrection('ubiquitious', { correctedText: 'ubiquitous' })?.label).toBe('✏️ 철자 교정: ubiquitious → ubiquitous');
+    expect(c).not.toHaveProperty('noteLine');
   });
 
-  it('단어 수가 달라지면 원래 입력 전체를 남긴다', () => {
+  it('단어 수가 달라지면 전체를 라벨에 쓴다', () => {
     const c = detectSpellingCorrection('alot of people', { correctedText: 'a lot of people' });
     expect(c?.text).toBe('a lot of people');
-    expect(c?.noteLine).toBe('✏️ 철자 교정 · 원래 입력: alot of people');
+    expect(c?.label).toBe('✏️ 철자 교정: alot of people → a lot of people');
   });
 
   it('고칠 게 없거나 대소문자·문장부호만 다르면 교정이 아니다', () => {
@@ -230,15 +230,33 @@ describe('철자 교정', () => {
     expect(detectSpellingCorrection('ubiquitous', { correctedText: '' })).toBeUndefined();
     expect(detectSpellingCorrection('ubiquitous', { correctedText: 'Ubiquitous.' })).toBeUndefined();
     expect(detectSpellingCorrection('"ubiquitous"', { correctedText: 'ubiquitous' })).toBeUndefined();
+    // 문장 안의 쉼표만 추가된 것도 교정이 아니다 (키는 달라지지만 단어는 같다)
+    expect(detectSpellingCorrection('our Special night which offers', { correctedText: 'our Special night, which offers' })).toBeUndefined();
   });
 
-  it('메모 맨 앞에 교정 기록을 붙이고, 모델이 쓴 "철자 확인:" 줄은 뺀다', () => {
-    const c = detectSpellingCorrection('everiything', { correctedText: 'everything' })!;
-    expect(withSpellingNote(undefined, c)).toBe('✏️ 철자 교정: everiything → everything');
-    expect(withSpellingNote('철자 확인: everything\nevery single thing과 비슷', c)).toBe(
-      '✏️ 철자 교정: everiything → everything\nevery single thing과 비슷'
+  it('모델이 메모에 쓴 "철자 확인:" 줄은 뺀다 — 교정 기록은 Notion에 남기지 않는다', () => {
+    expect(stripSpellingNote('철자 확인: everything\nevery single thing과 비슷')).toBe('every single thing과 비슷');
+    expect(stripSpellingNote('as soon as: ~하자마자')).toBe('as soon as: ~하자마자');
+    expect(stripSpellingNote('철자 확인: everything')).toBeUndefined();
+    expect(stripSpellingNote(undefined)).toBeUndefined();
+  });
+
+  it('수정·이어 붙이기 결과의 text가 철자만 다르면 교정으로 본다', () => {
+    const fields = applyRevision(
+      { text: 'select winds', key: 'select winds', kind: 'word' },
+      { meaning: '엄선된 와인', synonyms: [], text: 'select wines' }
     );
-    expect(withSpellingNote('as soon as: ~하자마자', c)).toBe('✏️ 철자 교정: everiything → everything\nas soon as: ~하자마자');
+    expect(spellingOfRevision('select winds', fields)?.label).toBe('✏️ 철자 교정: winds → wines');
+    expect(spellingOfRevision('select wines', { text: undefined })).toBeUndefined();
+    expect(spellingOfRevision('select wines', {})).toBeUndefined();
+  });
+
+  it('카드에는 교정 안내 한 줄이 들어가고, Notion 메모 필드에는 들어가지 않는다', () => {
+    const e = entry({ text: 'everything', meaning: '모든 것', note: 'every single thing과 비슷' });
+    const card = formatVocabCard(e, { repeated: false, spelling: '✏️ 철자 교정: everiything → everything' });
+    expect(card).toContain('✏️ 철자 교정: everiything → everything');
+    expect(formatVocabCard(e, { repeated: false })).not.toContain('철자 교정');
+    expect(e.note).not.toContain('철자');
   });
 });
 
@@ -547,6 +565,41 @@ describe('의도 분류 (새 표현 / 수정 / 이어 붙이기)', () => {
     expect(joined.text).not.toMatch(/[가-힣]/);
     // 카드는 같은 pageId 한 장 — 새 카드 생성 경로(parseVocabMessage)로 가지 않는다
     expect({ ...card, ...joined }.pageId).toBe(PAGE_ID);
+
+    // reviseVocab이 합친 문장의 확실한 오타만 고쳐 text로 돌려주면 그 교정본이 저장되고, 카드에 한 줄 안내가 붙는다
+    const revision = parseVocabRevision(
+      JSON.stringify({
+        text: 'that also happens to be our Wine & appetizer Special night which offers a 5 percent discount on all appetizers and select wines',
+        meaning: '그날은 마침 저희 와인 & 애피타이저 스페셜 나이트이기도 한데, 모든 애피타이저와 엄선된 와인을 5% 할인해 드립니다',
+        synonyms: [],
+        note: 'happen to be: 마침 ~이기도 하다',
+      })
+    );
+    const revised = applyRevision({ ...card, ...joined }, revision);
+    const spelling = spellingOfRevision(joined.text, revised)!;
+    const fields = { ...joined, ...revised, note: stripSpellingNote(revised.note) };
+    expect(fields.text).toBe(
+      'that also happens to be our Wine & appetizer Special night which offers a 5 percent discount on all appetizers and select wines'
+    );
+    expect(fields.key).toBe(normalizeVocabKey(fields.text!));
+    expect(spelling.label).toBe('✏️ 철자 교정: Wind → Wine, discout → discount, winds → wines');
+    expect(fields.note).not.toContain('철자');
+    expect(fields.note).not.toContain('winds');
+    const sent = formatVocabCard({ ...card, ...fields }, { repeated: false, appended: true, spelling: spelling.label });
+    expect(sent).toContain('➕ <b>이어 붙였어요</b>');
+    expect(sent).toContain('✏️ 철자 교정: Wind → Wine, discout → discount, winds → wines');
+  });
+
+  it('스크린샷 사례 ②: 첫 문장 저장 때 enrich가 Wind → Wine을 고치면 교정본으로 저장된다', () => {
+    const e = parseVocabEnrichment(
+      JSON.stringify({ correctedText: 'that also happens to be our Wine & appetizer Special night', meaning: '번역', synonyms: [], note: 'happen to be: 마침 ~이다' })
+    );
+    const correction = detectSpellingCorrection(FIRST, e)!;
+    expect(correction.text).toBe('that also happens to be our Wine & appetizer Special night');
+    expect(correction.key).toBe('that also happens to be our wine & appetizer special night');
+    expect(correction.label).toBe('✏️ 철자 교정: Wind → Wine');
+    const filled = fillFromEnrichment({ meaning: undefined }, e);
+    expect(stripSpellingNote(filled.note)).toBe('happen to be: 마침 ~이다');
   });
 });
 

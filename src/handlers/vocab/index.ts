@@ -29,7 +29,8 @@ import {
   detectKind,
   fillFromEnrichment,
   detectSpellingCorrection,
-  withSpellingNote,
+  stripSpellingNote,
+  spellingOfRevision,
   initialReview,
   applyRepeatCapture,
   applyRevision,
@@ -40,6 +41,7 @@ import {
   pickDueEntries,
   needsEnrichment,
   BOX_INTERVAL_DAYS,
+  type RevisedFields,
 } from '../../domain/vocab';
 import { DEFAULTS } from '../../lib/constants';
 import type { VocabEnrichment, VocabEntry, VocabIntentResult, VocabKind } from '../../lib/types';
@@ -48,7 +50,8 @@ import type { VocabEnrichment, VocabEntry, VocabIntentResult, VocabKind } from '
  * TOEFL 단어장 Lambda. 원본 저장소는 Notion "TOEFL Vocab" DB.
  * - capture: Feedback Lambda가 Telegram 메시지를 받아 비동기로 넘긴다 (Bedrock 호출이 webhook 응답을 막지 않게).
  *   한 줄 = 표현 1건 → 뜻·번역 채워서 Notion에 저장 → 카드로 답장. 이미 있는 표현이면 헷갈린 횟수 +1.
- *   입력에 오타가 있으면 Bedrock이 고친 철자로 저장하고 메모 맨 앞에 원래 입력을 남긴다 (고친 철자가 이미 있으면 그 카드의 헷갈린 횟수 +1).
+ *   입력에 확실한 오타가 있으면 Bedrock이 고친 철자로 저장한다 — 원문은 어디에도 남기지 않고 카드에만 "✏️ 철자 교정: a → b" 한 줄
+ *   (고친 철자가 이미 있으면 그 카드의 헷갈린 횟수 +1). 수정·이어 붙이기 결과에도 같은 교정이 적용된다.
  * - 수정: 카드(저장·복습 메시지)에 답장으로 쓰거나, 답장 없이 한국어로 "~라는 뜻이야"라고 보내면
  *   그 표현(답장 없으면 마지막으로 저장한 표현)의 카드를 요청대로 다시 쓴다. 새 표현으로 저장하지 않는다.
  * - 의도 분류: 한글이 섞인 메시지는 새 표현(new) / 수정(revise) / 마지막 카드에 이어 붙이기(append) 중 하나다.
@@ -170,7 +173,7 @@ async function capture(cfg: AppConfig, text: string, messageId?: number, replyTo
         }
       }
       const enriched = e ? fillFromEnrichment({ meaning: input.meaning }, e) : undefined;
-      if (enriched && correction) enriched.note = withSpellingNote(enriched.note, correction);
+      if (enriched) enriched.note = stripSpellingNote(enriched.note);
       const fields: VocabFields = {
         text: correction?.text ?? input.text,
         key: correction?.key ?? normalizeVocabKey(input.text),
@@ -188,7 +191,7 @@ async function capture(cfg: AppConfig, text: string, messageId?: number, replyTo
       await sendReply(
         botToken,
         cfg.telegramChatId,
-        formatVocabCard(entry, { repeated: false }),
+        formatVocabCard(entry, { repeated: false, spelling: correction?.label }),
         messageId,
         buildVocabSavedKeyboard(pageId)
       );
@@ -256,12 +259,24 @@ async function append(
     }
     const instruction = `표현 뒤에 "${clause}"를 이어 붙여 한 문장이 됐다${
       decision.instruction ? ` (사용자 요청: ${decision.instruction})` : ''
-    }. 바뀐 전체 문장에 맞춰 번역·예문·핵심 표현을 다시 써라. text는 그대로 두라.`;
+    }. 바뀐 전체 문장에 맞춰 번역·예문·핵심 표현을 다시 써라. text는 확실한 오타의 철자 교정 외에는 그대로 두라.`;
     const revision = await reviseVocab(cfg.bedrockModelId, cfg.bedrockRegion, { ...entry, ...joined }, instruction);
-    const fields = { ...applyRevision({ ...entry, ...joined }, revision), ...joined };
+    // 표현·키·종류는 코드가 정한 joined가 기본. Bedrock이 철자만 고쳤으면(spellingOfRevision) 그 교정본으로 저장한다.
+    const revised = applyRevision({ ...entry, ...joined }, revision);
+    const fields: RevisedFields = { ...joined, ...revised, note: stripSpellingNote(revised.note) };
+    let spelling = spellingOfRevision(joined.text, revised);
+    if (!spelling) Object.assign(fields, joined);
+    else {
+      const clash = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, fields.key!);
+      if (clash && clash.pageId !== entry.pageId) {
+        // 고친 철자가 이미 다른 카드면 표현은 친 그대로 두고 번역만 반영
+        Object.assign(fields, joined);
+        spelling = undefined;
+      }
+    }
     await updateVocabPage(notionToken, entry.pageId, fields);
     await rememberLastCapture(cfg, entry.pageId);
-    const card = formatVocabCard({ ...entry, ...fields }, { repeated: false, appended: true });
+    const card = formatVocabCard({ ...entry, ...fields }, { repeated: false, appended: true, spelling: spelling?.label });
     await sendReply(botToken, cfg.telegramChatId, card, messageId, buildVocabSavedKeyboard(entry.pageId));
     console.log(`vocab append: ${entry.pageId} +"${clause.slice(0, 40)}"`);
     return true;
@@ -302,6 +317,7 @@ async function correct(
   try {
     const revision = await reviseVocab(cfg.bedrockModelId, cfg.bedrockRegion, entry, instruction);
     const fields = applyRevision(entry, revision);
+    fields.note = stripSpellingNote(fields.note);
     if (fields.key && fields.key !== entry.key) {
       // 고친 표현이 이미 다른 행에 있으면 표현은 그대로 두고 뜻만 고친다
       const clash = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, fields.key);
@@ -311,9 +327,11 @@ async function correct(
         delete fields.kind;
       }
     }
+    // 요청과 무관하게 Bedrock이 확실한 오타를 고쳤으면 카드에 한 줄로 알린다 (Notion엔 교정본만 저장)
+    const spelling = spellingOfRevision(entry.text, fields)?.label;
     await updateVocabPage(notionToken, pageId, fields);
     await rememberLastCapture(cfg, pageId);
-    const card = formatVocabCard({ ...entry, ...fields }, { repeated: false, corrected: true });
+    const card = formatVocabCard({ ...entry, ...fields }, { repeated: false, corrected: true, spelling });
     await sendReply(botToken, cfg.telegramChatId, card, messageId, buildVocabSavedKeyboard(pageId));
     console.log(`vocab correct: ${pageId} text=${fields.text ? 'changed' : 'kept'}`);
     return true;
@@ -412,7 +430,7 @@ async function enrichPending(cfg: AppConfig, notionToken: string, today: string)
     if (!e) continue;
     const correction = detectSpellingCorrection(entry.text, e);
     const filled = fillFromEnrichment(entry, e);
-    if (correction) filled.note = withSpellingNote(filled.note, correction);
+    filled.note = stripSpellingNote(filled.note);
     const fields: VocabFields = {
       ...filled,
       key: correction?.key ?? entry.key ?? normalizeVocabKey(entry.text),
