@@ -2,7 +2,8 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
-import type { Curation, LessonContent, SourceType, VocabEnrichment, VocabEntry, VocabKind, VocabRevision } from './types';
+import type { Curation, LessonContent, SourceType, VocabEnrichment, VocabEntry, VocabIntent, VocabIntentResult, VocabKind, VocabRevision } from './types';
+import { splitKoreanInstruction } from '../domain/vocab';
 import { AREA_LABEL } from '../domain/curriculum';
 import type { LessonPlan } from '../domain/learning';
 
@@ -212,10 +213,14 @@ const VOCAB_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 사용�
   note = 자주 같이 쓰는 표현(콜로케이션)이나 헷갈리기 쉬운 점 1~2문장.
 - 문장이면: meaning = 자연스러운 한국어 번역, pos·pronunciation·example은 빈 문자열, synonyms = [],
   note = 문장 속 핵심 단어·표현 2~4개를 "표현: 뜻" 형식으로 한 줄씩.
-- 철자가 틀린 것 같으면 note 맨 앞에 "철자 확인: <올바른 철자>"를 써라.
+- 입력에 **확실한** 오타가 있으면 correctedText에 철자만 고친 표현 전체를 넣어라 (예: "everiything" → "everything",
+  문맥상 "appetizers and select winds" → "wines", "discout" → "discount").
+  단어 선택·문법·대소문자·문장부호는 바꾸지 말고 철자만 고친다. 고유명사·구어체·줄임말·일부러 그렇게 쓴 표기는 교정하지 않는다.
+  확신이 없으면 고치지 않는다. 고칠 게 없으면 correctedText는 빈 문자열.
+  meaning·example·note는 고친 표현을 기준으로 쓰고, note에 철자 얘기는 쓰지 마라 (카드가 따로 표시한다).
 - 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
-{"meaning": "<뜻 또는 번역>", "pos": "<noun|verb|adjective|adverb|phrase|idiom|...>", "pronunciation": "<IPA>",
- "example": "<영어 예문>", "exampleKo": "<예문 번역>", "synonyms": ["<동의어>", ...], "note": "<팁 또는 핵심 표현>"}`;
+{"correctedText": "<철자를 고친 표현 또는 빈 문자열>", "meaning": "<뜻 또는 번역>", "pos": "<noun|verb|adjective|adverb|phrase|idiom|...>",
+ "pronunciation": "<IPA>", "example": "<영어 예문>", "exampleKo": "<예문 번역>", "synonyms": ["<동의어>", ...], "note": "<팁 또는 핵심 표현>"}`;
 
 export function buildVocabPrompt(text: string, kind: VocabKind, userMeaning?: string): string {
   return `종류: ${kind === 'word' ? '단어/표현' : '문장'}
@@ -236,6 +241,7 @@ export function parseVocabEnrichment(text: string): VocabEnrichment {
     exampleKo: str(p.exampleKo) || undefined,
     synonyms: Array.isArray(p.synonyms) ? p.synonyms.map(str).filter(Boolean).slice(0, 6) : [],
     note: str(p.note) || undefined,
+    correctedText: str(p.correctedText) || undefined,
   };
   if (!result.meaning) throw new Error(`단어 응답에 뜻 없음: ${text.slice(0, 200)}`);
   return result;
@@ -250,7 +256,9 @@ const VOCAB_REVISE_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 
 - 사용자의 요청이 최우선이다. 사용자가 말한 뜻·뉘앙스·문맥이 사전적 의미와 달라 보여도 사용자의 해석을 따른다.
 - 요청과 상관없는 칸은 원래 값을 그대로 둔다. 요청으로 뜻이 바뀌어 다른 칸(예문·메모·핵심 표현)이 틀리게 되면 그 칸만 맞춰 고친다.
 - 뜻·번역·설명은 한국어로. 형식은 원래 카드와 같게 (단어: meaning 1~3개 / 문장: meaning = 번역, note = "표현: 뜻" 한 줄씩).
-- 사용자가 표현 자체의 철자·단어를 고쳐 달라고 했을 때만 text를 고친 표현으로 채우고, 아니면 text는 원래 표현 그대로.
+- text: 사용자가 표현 자체의 철자·단어를 고쳐 달라고 했으면 그대로 반영한다. 요청이 없어도 표현에 **확실한** 오타가 있으면
+  (예: "discout" → "discount", 문맥상 "select winds" → "wines") 철자만 고쳐 text에 넣는다. 그 밖에는 text는 원래 표현 그대로.
+  단어 선택·문법·대소문자·문장부호는 바꾸지 말고, 고유명사·구어체·일부러 그렇게 쓴 표기는 교정하지 않는다. note에 철자 얘기는 쓰지 마라.
 - 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
 {"text": "<표현>", "meaning": "<뜻 또는 번역>", "pos": "<품사 또는 빈 문자열>", "pronunciation": "<IPA 또는 빈 문자열>",
  "example": "<영어 예문 또는 빈 문자열>", "exampleKo": "<예문 번역 또는 빈 문자열>", "synonyms": ["<동의어>", ...], "note": "<팁 또는 핵심 표현>"}`;
@@ -293,6 +301,61 @@ export async function reviseVocab(
 ): Promise<VocabRevision> {
   const raw = await invokeClaude(modelId, region, VOCAB_REVISE_SYSTEM_PROMPT, buildVocabRevisionPrompt(entry, instruction), 800);
   return parseVocabRevision(raw);
+}
+
+// ---- 의도 분류: 한국어가 섞인 메시지가 새 표현인지, 마지막 카드 수정인지, 마지막 카드에 이어 붙이는 것인지
+
+const VOCAB_INTENT_SYSTEM_PROMPT = `너는 사용자의 TOEFL 영어 튜터다. 사용자는 한국어 화자이고, Telegram으로 영어 단어·표현·문장을 보내 단어장에 저장한다.
+이번 메시지에는 한국어가 섞여 있다. 메시지가 아래 셋 중 무엇인지 분류하고, 한국어 지시와 영어 본문을 분리한다.
+
+- "new": 새 영어 표현을 저장해 달라는 것. 한국어는 메모·설명일 뿐이다 (예: "이것도 저장해줘 take into account").
+- "revise": 마지막 카드(아래 '마지막 카드')의 뜻·번역·예문을 고쳐 달라는 것 (예: "고용이 아니라 근무가 시작된다는 뜻이야", "commence는 '시작하다'로 번역해줘").
+- "append": 마지막 카드의 영어 표현 **뒤에** 영어 절을 이어 붙여 한 문장으로 만들어 달라는 것
+  (예: "아까 문장에 추가로 which offers a discount", "앞 문장 뒤에 이어서 …", "그 문장에 덧붙여 …").
+
+작성 원칙:
+- english에는 영어 본문만 넣는다. 한국어 지시("아까 문장에 추가로", "~라는 뜻이야" 등)는 절대 english에 넣지 않는다. 영어 철자는 고치지 말고 그대로 둔다.
+- instruction에는 한국어 지시 부분을 넣는다. 없으면 빈 문자열.
+- 마지막 카드가 없는데 revise/append로 보이면 그대로 revise/append로 답한다 (처리는 호출 쪽이 한다).
+- 반드시 아래 JSON 스키마만 출력하고, 그 외 텍스트는 절대 출력하지 마라.
+{"intent": "<new|revise|append>", "english": "<영어 본문>", "instruction": "<한국어 지시 또는 빈 문자열>"}`;
+
+type VocabIntentContext = Pick<VocabEntry, 'text' | 'meaning'>;
+
+export function buildVocabIntentPrompt(message: string, lastCard?: VocabIntentContext): string {
+  const card = lastCard
+    ? `마지막 카드:\n${JSON.stringify({ text: lastCard.text, meaning: lastCard.meaning ?? '' }, null, 2)}`
+    : '마지막 카드: 없음';
+  return `${card}
+
+사용자 메시지: ${message}
+
+분류 결과를 JSON으로만 답하라.`;
+}
+
+const VOCAB_INTENTS: readonly VocabIntent[] = ['new', 'revise', 'append'];
+
+/**
+ * Bedrock 응답 → VocabIntentResult. intent가 셋 중 하나가 아니면 throw.
+ * english에 한글이 남아 있으면(LLM이 지시를 같이 넣은 경우) 양 끝의 한국어를 떼어 낸다 — 한국어 접두어가 표현에 섞이지 않게. 순수함수.
+ */
+export function parseVocabIntent(text: string): VocabIntentResult {
+  const p = parseJsonObject(text);
+  const intent = str(p.intent) as VocabIntent;
+  if (!VOCAB_INTENTS.includes(intent)) throw new Error(`의도 응답이 올바르지 않음: ${text.slice(0, 200)}`);
+  const split = splitKoreanInstruction(str(p.english));
+  const instruction = [str(p.instruction), split.instruction].filter(Boolean).join(' ') || undefined;
+  return { intent, english: split.english, instruction };
+}
+
+export async function classifyVocabMessage(
+  modelId: string,
+  region: string,
+  message: string,
+  lastCard?: VocabIntentContext
+): Promise<VocabIntentResult> {
+  const raw = await invokeClaude(modelId, region, VOCAB_INTENT_SYSTEM_PROMPT, buildVocabIntentPrompt(message, lastCard), 400);
+  return parseVocabIntent(raw);
 }
 
 export async function enrichVocab(
