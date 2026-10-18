@@ -52,6 +52,37 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
+> 🧭 **2026-10-18 단어장 의도 분류 증분(새 표현 / 수정 / 이어 붙이기) — develop PR, Prod 미반영** (브랜치 `claude/fervent-banach-7d1908`, 아래 철자 교정 브랜치(PR #13)를 합쳐서 한 PR로 올림).
+> 문제: 20:36에 "that also happens to be our Wind & appetizer Special night"를 저장하고 20:40에 "아까 문장에 추가로 which offers a 5 percent discout on all appetizers and select winds"를 보냈더니
+> 영문이 한글보다 많아 `isCorrectionRequest`가 false → **한국어 접두어까지 포함한 새 카드**가 생겼다. "앞 문장에 이어 붙여라"는 의도 자체가 코드에 없었다.
+> - 의도 3종 `VocabIntent = new | revise | append` (`types.ts`). 분기는 `capture()`:
+>   ① 한글 없음 → 지금처럼 바로 저장(답장이면 revise). **Bedrock 호출 수 그대로.** ② 한글 > 영문(`isCorrectionRequest`) → revise 빠른 경로.
+>   ③ 그 사이(한글 섞임, 영문이 더 많음) → `classifyVocabMessage`(Bedrock, 마지막 카드의 표현·뜻을 같이 줌) → `{intent, english, instruction}`.
+>   분류 실패 시 `fallbackVocabIntent`: `splitKoreanInstruction`으로 양 끝 한국어를 떼고 지시어(추가/이어/붙/뒤에)로 추정 — 어느 쪽이든 한국어가 표현에 섞여 저장되지 않는다.
+> - append: 대상 카드(답장 카드 또는 24시간 안 마지막 저장) 표현을 `appendToEntry`로 "기존 + 새 절" 합치고 키·종류 재계산 → `reviseVocab`으로 번역·예문·핵심 표현 다시 씀.
+>   표현·키·종류는 코드가 정한다(Bedrock이 철자를 바꾸지 못하게). 복습 상태 유지. 합친 키가 다른 카드와 겹치면 안내만. 카드 머리말 `➕ 이어 붙였어요`.
+> - 대상 카드가 없으면 기존 `VOCAB_CORRECTION_TARGET_MISSING` 안내. `/help`에 이어 붙이기 사용법 한 줄 추가.
+> - 테스트: 스크린샷 사례를 `test/vocab.test.ts`에 고정(새 카드가 아니라 첫 카드 1장, 표현에 한글 없음, 철자 교정본으로 저장). 단위테스트 163개(신규 12), `tsc`, `cdk synth` 통과.
+> - **Notion 데이터 정리(2026-10-18, 세션에서 직접)**: Wind 카드를 이어 붙인 문장(Wine/discount/wines로 교정)으로 고침. 교정·원문 메모 줄은 사용자 결정에 따라 전부 뺌(기존 `철자 확인:` 줄 3건 포함).
+>   뜻이 엉뚱했던 "who is organizing the company retreat this year?"(매물 문장 번역이 들어가 있었음) 수정. 오타 제목 5건(handsout/dayh/everiything/requried/이중 공백) 교정.
+>   잘못 생성된 "아까 문장에 추가로 …" 행(`3fde549ed1028130a0c5fbd7b1a0d9a1`)은 삭제 권한이 없어 **아직 남아 있음 — Telegram 카드의 🗑 삭제 또는 Notion에서 지울 것.**
+> - ⚠️ **왜 철자 교정이 "적용 안 됐나"**: PR #13은 올라갔지만 머지되지 않았고, 그 사이 develop→Prod(#14, 10/18 11:31Z)가 배포됨. 코드가 아니라 머지 단계가 빠진 것.
+>   **규칙: 작업이 끝나면 push + develop PR까지 올리고, 미머지 PR이 있으면 먼저 확인한다. 배포는 develop→Prod 머지로만.**
+> - 남은 확인(Prod 머지 후 폰에서 E2E): 영어 문장 저장 → "아까 문장에 추가로 …" → `➕ 이어 붙였어요` 카드 1장, Notion 행 1개만. 한국어만 보낸 수정은 전처럼 `✏️ 고쳤어요`.
+
+> 🔤 **2026-10-18 단어장 철자 자동 교정 증분 — develop PR, Prod 미반영** (브랜치 `claude/english-translation-spelling-65d7fe`).
+> 문제: "everiything"처럼 오타가 있는 문장을 보내면 모델은 오타를 알아채고 메모에 `철자 확인: everything`이라고 쓰는데, 표현(Notion 제목)은 오타 그대로 저장됐다.
+> 원인은 모델이 아니라 코드 — 저장 프롬프트가 교정을 note에만 쓰게 했고 응답 스키마에 고친 표현을 돌려줄 칸이 없었다(핸들러는 항상 `input.text`를 저장). 모델 교체로는 안 고쳐진다.
+> - 단어 응답(`VocabEnrichment`)에 `correctedText` 추가. 프롬프트: 오타가 있으면 **철자만** 고친 표현 전체를 넣고(단어 선택·문법·대소문자·문장부호는 그대로), 없으면 빈 문자열. note에 철자 얘기는 쓰지 않는다.
+> - `detectSpellingCorrection`(순수함수): correctedText의 dedup 키가 원래와 다르고 **바뀐 단어가 있을 때만** 교정으로 본다(대소문자·문장부호·쉼표만 다르면 사용자가 쓴 그대로). 고친 표현·키·종류 + 카드용 라벨을 돌려준다.
+>   **(2026-10-18 변경, 사용자 결정 "참고 줄 필요없어") 원문은 어디에도 남기지 않는다.** 라벨 `✏️ 철자 교정: winds → wines`는 Telegram 카드에만 한 줄 표시(`formatVocabCard` `spelling`), Notion 메모에는 쓰지 않는다.
+>   모델이 예전 형식대로 쓴 `철자 확인:` 줄은 `stripSpellingNote`로 뺀다. (처음 구현의 `withSpellingNote`(메모 맨 앞 기록)는 제거.)
+> - Telegram 저장: 고친 철자의 키가 **이미 있는 표현이면 새 행 대신 그 카드의 헷갈린 횟수 +1**(한 번 더 조회). 사용자가 `::`로 쓴 뜻은 그대로. 교정이 없으면 동작 변화 없음.
+> - Notion 빈 칸 채우기(`enrichPending`)도 똑같이 — 제목을 고친 철자로 바꾼다(메모엔 기록 없음).
+> - **수정·이어 붙이기 경로에도 적용(2026-10-18)**: revise 프롬프트가 요청과 무관하게 확실한 오타는 `text`에 철자만 고쳐 넣고(고유명사·구어체·고의적 표기 제외),
+>   `spellingOfRevision`이 친 문장과 비교해 교정이면 카드에 라벨. 고친 키가 다른 카드와 겹치면 친 그대로 두고 뜻만 반영. 스크린샷 사례 테스트에 Wind→Wine, discout→discount, winds→wines 저장 반영까지 고정.
+> - 검증: `tsc`, 단위테스트 163개, `cdk synth` 성공. **남은 확인(E2E, 배포 후)**: 오타 문장 1건 → 카드 제목이 고쳐지고 카드에 `✏️ 철자 교정` 한 줄(Notion 메모엔 없음), 같은 문장을 바르게 다시 보내면 `이미 있는 표현`으로 집계되는지.
+
 > ✏️ **2026-10-17 단어장 뜻 수정 증분 — 2026-10-17 배포 완료** (PR #9 → develop, PR #10 → Prod 6495cf4, Deploy 워크플로 성공. `VocabFn`·`FeedbackFn` 09:30 KST 갱신 확인).
 > 문제: 카드 번역이 어색해서 "고용이 아니라 근무가 시작된다는 뜻이야"라고 보냈더니 그 한국어 문장이 **새 표현으로 저장**됐다.
 > - 수정 요청 판별(`isCorrectionRequest`, 순수함수): 한글이 영문자보다 많은 메시지는 새 표현이 아니라 수정 요청. `표현 :: 뜻`·`#태그`는 세지 않는다.

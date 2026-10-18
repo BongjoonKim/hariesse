@@ -6,6 +6,9 @@ import {
   detectKind,
   parseVocabMessage,
   fillFromEnrichment,
+  detectSpellingCorrection,
+  stripSpellingNote,
+  spellingOfRevision,
   initialReview,
   applyReview,
   applyRepeatCapture,
@@ -17,13 +20,20 @@ import {
   pageIdFromReplyMarkup,
   applyRevision,
   isWithinCorrectionWindow,
+  hasKoreanInstruction,
+  splitKoreanInstruction,
+  classifyVocabMessageLocally,
+  fallbackVocabIntent,
+  guessIntentFromInstruction,
+  joinClause,
+  appendToEntry,
   MAX_INPUTS_PER_MESSAGE,
   type ReviewFields,
   type VocabAction,
 } from '../src/domain/vocab';
 import { buildVocabProperties, parseVocabPage, VOCAB_PROP } from '../src/lib/notion-vocab';
 import { formatVocabCard, formatReviewItem, buildVocabSavedKeyboard, buildReviewKeyboard } from '../src/lib/telegram';
-import { parseVocabEnrichment, buildVocabPrompt, parseVocabRevision, buildVocabRevisionPrompt } from '../src/lib/bedrock';
+import { parseVocabEnrichment, buildVocabPrompt, parseVocabRevision, buildVocabRevisionPrompt, parseVocabIntent, buildVocabIntentPrompt } from '../src/lib/bedrock';
 import type { VocabEntry } from '../src/lib/types';
 
 const TODAY = '2026-10-11';
@@ -190,6 +200,63 @@ describe('fillFromEnrichment', () => {
 
   it('공백뿐인 칸은 빈 칸으로 본다', () => {
     expect(fillFromEnrichment({ meaning: '  ' }, e).meaning).toBe('어디에나 있는');
+  });
+});
+
+describe('철자 교정', () => {
+  const sentence = "send them to me as soon as they're done and i'll get everiything edited";
+  const fixed = "send them to me as soon as they're done and i'll get everything edited";
+
+  it('오타가 있으면 고친 표현·키·종류와 카드용 라벨을 돌려준다 (원문은 저장하지 않는다)', () => {
+    const c = detectSpellingCorrection(sentence, { correctedText: fixed });
+    expect(c).toEqual({
+      text: fixed,
+      key: normalizeVocabKey(fixed),
+      kind: 'sentence',
+      label: '✏️ 철자 교정: everiything → everything',
+    });
+    expect(detectSpellingCorrection('ubiquitious', { correctedText: 'ubiquitous' })?.label).toBe('✏️ 철자 교정: ubiquitious → ubiquitous');
+    expect(c).not.toHaveProperty('noteLine');
+  });
+
+  it('단어 수가 달라지면 전체를 라벨에 쓴다', () => {
+    const c = detectSpellingCorrection('alot of people', { correctedText: 'a lot of people' });
+    expect(c?.text).toBe('a lot of people');
+    expect(c?.label).toBe('✏️ 철자 교정: alot of people → a lot of people');
+  });
+
+  it('고칠 게 없거나 대소문자·문장부호만 다르면 교정이 아니다', () => {
+    expect(detectSpellingCorrection('ubiquitous', {})).toBeUndefined();
+    expect(detectSpellingCorrection('ubiquitous', { correctedText: '' })).toBeUndefined();
+    expect(detectSpellingCorrection('ubiquitous', { correctedText: 'Ubiquitous.' })).toBeUndefined();
+    expect(detectSpellingCorrection('"ubiquitous"', { correctedText: 'ubiquitous' })).toBeUndefined();
+    // 문장 안의 쉼표만 추가된 것도 교정이 아니다 (키는 달라지지만 단어는 같다)
+    expect(detectSpellingCorrection('our Special night which offers', { correctedText: 'our Special night, which offers' })).toBeUndefined();
+  });
+
+  it('모델이 메모에 쓴 "철자 확인:" 줄은 뺀다 — 교정 기록은 Notion에 남기지 않는다', () => {
+    expect(stripSpellingNote('철자 확인: everything\nevery single thing과 비슷')).toBe('every single thing과 비슷');
+    expect(stripSpellingNote('as soon as: ~하자마자')).toBe('as soon as: ~하자마자');
+    expect(stripSpellingNote('철자 확인: everything')).toBeUndefined();
+    expect(stripSpellingNote(undefined)).toBeUndefined();
+  });
+
+  it('수정·이어 붙이기 결과의 text가 철자만 다르면 교정으로 본다', () => {
+    const fields = applyRevision(
+      { text: 'select winds', key: 'select winds', kind: 'word' },
+      { meaning: '엄선된 와인', synonyms: [], text: 'select wines' }
+    );
+    expect(spellingOfRevision('select winds', fields)?.label).toBe('✏️ 철자 교정: winds → wines');
+    expect(spellingOfRevision('select wines', { text: undefined })).toBeUndefined();
+    expect(spellingOfRevision('select wines', {})).toBeUndefined();
+  });
+
+  it('카드에는 교정 안내 한 줄이 들어가고, Notion 메모 필드에는 들어가지 않는다', () => {
+    const e = entry({ text: 'everything', meaning: '모든 것', note: 'every single thing과 비슷' });
+    const card = formatVocabCard(e, { repeated: false, spelling: '✏️ 철자 교정: everiything → everything' });
+    expect(card).toContain('✏️ 철자 교정: everiything → everything');
+    expect(formatVocabCard(e, { repeated: false })).not.toContain('철자 교정');
+    expect(e.note).not.toContain('철자');
   });
 });
 
@@ -386,7 +453,13 @@ describe('Bedrock 단어 응답', () => {
       exampleKo: undefined,
       synonyms: [],
       note: 'corroborate: 뒷받침하다',
+      correctedText: undefined,
     });
+  });
+
+  it('철자를 고친 표현을 correctedText로 받는다', () => {
+    const r = parseVocabEnrichment('{"correctedText":"everything","meaning":"모든 것","synonyms":[]}');
+    expect(r.correctedText).toBe('everything');
   });
 
   it('뜻이 없으면 throw', () => {
@@ -410,5 +483,150 @@ describe('Bedrock 단어 응답', () => {
     expect(parseVocabRevision('{"meaning":"근무는 9월 1일에 시작된다","synonyms":[]}')).toMatchObject({ meaning: '근무는 9월 1일에 시작된다', text: undefined });
     expect(parseVocabRevision('{"text":"commence","meaning":"시작하다","synonyms":[]}').text).toBe('commence');
     expect(() => parseVocabRevision('{"text":"commence","meaning":""}')).toThrow();
+  });
+});
+
+describe('의도 분류 (새 표현 / 수정 / 이어 붙이기)', () => {
+  const FIRST = 'that also happens to be our Wind & appetizer Special night';
+  const SECOND = '아까 문장에 추가로 which offers a 5 percent discout on all appetizers and select winds';
+
+  it('영어만 있으면 Bedrock 분류 없이 바로 저장(new) — 답장이면 수정(revise)', () => {
+    expect(classifyVocabMessageLocally(FIRST, false)).toEqual({ intent: 'new', english: FIRST });
+    expect(classifyVocabMessageLocally('mitigate :: 완화하다 #reading', false)).toEqual({ intent: 'new', english: 'mitigate :: 완화하다 #reading' });
+    expect(classifyVocabMessageLocally('it means to start', true)).toMatchObject({ intent: 'revise', instruction: 'it means to start' });
+    expect(hasKoreanInstruction(FIRST)).toBe(false);
+    expect(hasKoreanInstruction('take into account :: 고려하다\nabate :: 약해지다')).toBe(false);
+  });
+
+  it('한글이 영문보다 많으면 빠른 경로로 수정(revise)', () => {
+    const msg = '고용이라기 보다는 근무가 9/1일 부터 시작할 거라는 뜻이 맞을 것 같아 수정해줘';
+    expect(classifyVocabMessageLocally(msg, false)).toMatchObject({ intent: 'revise', instruction: msg });
+  });
+
+  it('한글이 섞여 있는데 영문이 더 많으면 Bedrock 분류로 넘긴다(undefined)', () => {
+    expect(hasKoreanInstruction(SECOND)).toBe(true);
+    expect(isCorrectionRequest(SECOND)).toBe(false);
+    expect(classifyVocabMessageLocally(SECOND, false)).toBeUndefined();
+  });
+
+  it('한국어 지시 접두어/접미어와 영어 본문을 나눈다', () => {
+    expect(splitKoreanInstruction(SECOND)).toEqual({
+      instruction: '아까 문장에 추가로',
+      english: 'which offers a 5 percent discout on all appetizers and select winds',
+    });
+    expect(splitKoreanInstruction('which offers a discount 를 앞 문장 뒤에 붙여줘')).toEqual({
+      instruction: '를 앞 문장 뒤에 붙여줘',
+      english: 'which offers a discount',
+    });
+    expect(splitKoreanInstruction('앞 문장에 이어서: and select wines')).toEqual({ instruction: '앞 문장에 이어서:', english: 'and select wines' });
+    expect(splitKoreanInstruction("commence는 '근무를 시작하다'로 번역해줘").english).toBe('');
+    expect(splitKoreanInstruction(FIRST)).toEqual({ instruction: '', english: FIRST });
+  });
+
+  it('Bedrock 분류가 실패하면 규칙으로 추정 — 한국어 접두어는 표현에 들어가지 않는다', () => {
+    expect(guessIntentFromInstruction('아까 문장에 추가로')).toBe('append');
+    expect(guessIntentFromInstruction('앞 문장 뒤에 붙여줘')).toBe('append');
+    expect(guessIntentFromInstruction('~라는 뜻이야')).toBe('revise');
+    expect(fallbackVocabIntent(SECOND)).toEqual({
+      intent: 'append',
+      english: 'which offers a 5 percent discout on all appetizers and select winds',
+      instruction: '아까 문장에 추가로',
+    });
+    expect(fallbackVocabIntent(FIRST)).toEqual({ intent: 'new', english: FIRST });
+  });
+
+  it('절을 이어 붙일 때 앞 문장의 마침표는 소문자/쉼표로 시작하는 절에서만 뗀다', () => {
+    expect(joinClause('The storm abated.', 'which surprised everyone')).toBe('The storm abated which surprised everyone');
+    expect(joinClause('The storm abated.', ', which surprised everyone')).toBe('The storm abated, which surprised everyone');
+    expect(joinClause('The storm abated.', 'Nobody expected it.')).toBe('The storm abated. Nobody expected it.');
+    expect(joinClause('abate', '')).toBe('abate');
+  });
+
+  it('스크린샷 사례: 20:36 저장 → 20:40 "아까 문장에 추가로 …" = 새 카드가 아니라 첫 카드에 이어 붙은 한 장', () => {
+    // 20:36 — 영어만 → 바로 저장
+    const first = classifyVocabMessageLocally(FIRST, false)!;
+    expect(first.intent).toBe('new');
+    const card = entry({ text: FIRST, key: normalizeVocabKey(FIRST), kind: 'sentence', meaning: '그것은 또한 우리의 와인 & 애피타이저 스페셜 나이트이기도 합니다' });
+
+    // 20:40 — 한글 섞임 → 로컬 판단 불가 → Bedrock 분류 결과(append)로 분기
+    expect(classifyVocabMessageLocally(SECOND, false)).toBeUndefined();
+    const decision = parseVocabIntent(
+      '{"intent":"append","english":"which offers a 5 percent discout on all appetizers and select winds","instruction":"아까 문장에 추가로"}'
+    );
+    expect(decision.intent).toBe('append');
+
+    const joined = appendToEntry(card, decision.english);
+    expect(joined.text).toBe(
+      'that also happens to be our Wind & appetizer Special night which offers a 5 percent discout on all appetizers and select winds'
+    );
+    expect(joined.key).toBe(normalizeVocabKey(joined.text));
+    expect(joined.key).not.toBe(card.key);
+    expect(joined.kind).toBe('sentence');
+    expect(joined.text).not.toMatch(/[가-힣]/);
+    // 카드는 같은 pageId 한 장 — 새 카드 생성 경로(parseVocabMessage)로 가지 않는다
+    expect({ ...card, ...joined }.pageId).toBe(PAGE_ID);
+
+    // reviseVocab이 합친 문장의 확실한 오타만 고쳐 text로 돌려주면 그 교정본이 저장되고, 카드에 한 줄 안내가 붙는다
+    const revision = parseVocabRevision(
+      JSON.stringify({
+        text: 'that also happens to be our Wine & appetizer Special night which offers a 5 percent discount on all appetizers and select wines',
+        meaning: '그날은 마침 저희 와인 & 애피타이저 스페셜 나이트이기도 한데, 모든 애피타이저와 엄선된 와인을 5% 할인해 드립니다',
+        synonyms: [],
+        note: 'happen to be: 마침 ~이기도 하다',
+      })
+    );
+    const revised = applyRevision({ ...card, ...joined }, revision);
+    const spelling = spellingOfRevision(joined.text, revised)!;
+    const fields = { ...joined, ...revised, note: stripSpellingNote(revised.note) };
+    expect(fields.text).toBe(
+      'that also happens to be our Wine & appetizer Special night which offers a 5 percent discount on all appetizers and select wines'
+    );
+    expect(fields.key).toBe(normalizeVocabKey(fields.text!));
+    expect(spelling.label).toBe('✏️ 철자 교정: Wind → Wine, discout → discount, winds → wines');
+    expect(fields.note).not.toContain('철자');
+    expect(fields.note).not.toContain('winds');
+    const sent = formatVocabCard({ ...card, ...fields }, { repeated: false, appended: true, spelling: spelling.label });
+    expect(sent).toContain('➕ <b>이어 붙였어요</b>');
+    expect(sent).toContain('✏️ 철자 교정: Wind → Wine, discout → discount, winds → wines');
+  });
+
+  it('스크린샷 사례 ②: 첫 문장 저장 때 enrich가 Wind → Wine을 고치면 교정본으로 저장된다', () => {
+    const e = parseVocabEnrichment(
+      JSON.stringify({ correctedText: 'that also happens to be our Wine & appetizer Special night', meaning: '번역', synonyms: [], note: 'happen to be: 마침 ~이다' })
+    );
+    const correction = detectSpellingCorrection(FIRST, e)!;
+    expect(correction.text).toBe('that also happens to be our Wine & appetizer Special night');
+    expect(correction.key).toBe('that also happens to be our wine & appetizer special night');
+    expect(correction.label).toBe('✏️ 철자 교정: Wind → Wine');
+    const filled = fillFromEnrichment({ meaning: undefined }, e);
+    expect(stripSpellingNote(filled.note)).toBe('happen to be: 마침 ~이다');
+  });
+});
+
+describe('Bedrock 의도 분류 응답', () => {
+  it('프롬프트에 마지막 카드와 메시지가 들어간다 (카드 없으면 "없음")', () => {
+    const prompt = buildVocabIntentPrompt('아까 문장에 추가로 which offers a discount', { text: 'our Special night', meaning: '스페셜 나이트' });
+    expect(prompt).toContain('"text": "our Special night"');
+    expect(prompt).toContain('아까 문장에 추가로 which offers a discount');
+    expect(buildVocabIntentPrompt('x')).toContain('마지막 카드: 없음');
+  });
+
+  it('intent 셋 중 하나가 아니면 throw, english에 남은 한국어는 떼어 낸다', () => {
+    expect(parseVocabIntent('{"intent":"new","english":"take into account","instruction":""}')).toEqual({
+      intent: 'new',
+      english: 'take into account',
+      instruction: undefined,
+    });
+    expect(parseVocabIntent('```json\n{"intent":"revise","english":"","instruction":"근무가 시작된다는 뜻이야"}\n```')).toMatchObject({
+      intent: 'revise',
+      instruction: '근무가 시작된다는 뜻이야',
+    });
+    // LLM이 지시를 english에 같이 넣어도 표현에는 한국어가 섞이지 않는다
+    expect(parseVocabIntent('{"intent":"append","english":"아까 문장에 추가로 which offers a discount","instruction":""}')).toEqual({
+      intent: 'append',
+      english: 'which offers a discount',
+      instruction: '아까 문장에 추가로',
+    });
+    expect(() => parseVocabIntent('{"intent":"delete","english":"x"}')).toThrow();
   });
 });
