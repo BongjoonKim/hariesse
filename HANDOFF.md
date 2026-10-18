@@ -52,7 +52,8 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
-> 🧭 **2026-10-18 단어장 의도 분류 증분(새 표현 / 수정 / 이어 붙이기) — develop PR, Prod 미반영** (브랜치 `claude/fervent-banach-7d1908`, 아래 철자 교정 브랜치(PR #13)를 합쳐서 한 PR로 올림).
+> 🧭 **2026-10-18 단어장 의도 분류 증분(새 표현 / 수정 / 이어 붙이기) — PR #15 develop 머지(22fc105), Prod PR #16 대기** (브랜치 `claude/fervent-banach-7d1908`, 철자 교정 PR #13을 합쳐 포함 → #13은 닫음).
+>   잘못 생성된 Notion 행("아까 문장에 추가로 …")은 사용자 확인 후 휴지통으로 이동(2026-10-18). **Prod 머지 = 배포 → 폰 E2E가 남은 일.**
 > 문제: 20:36에 "that also happens to be our Wind & appetizer Special night"를 저장하고 20:40에 "아까 문장에 추가로 which offers a 5 percent discout on all appetizers and select winds"를 보냈더니
 > 영문이 한글보다 많아 `isCorrectionRequest`가 false → **한국어 접두어까지 포함한 새 카드**가 생겼다. "앞 문장에 이어 붙여라"는 의도 자체가 코드에 없었다.
 > - 의도 3종 `VocabIntent = new | revise | append` (`types.ts`). 분기는 `capture()`:
@@ -70,7 +71,7 @@
 >   **규칙: 작업이 끝나면 push + develop PR까지 올리고, 미머지 PR이 있으면 먼저 확인한다. 배포는 develop→Prod 머지로만.**
 > - 남은 확인(Prod 머지 후 폰에서 E2E): 영어 문장 저장 → "아까 문장에 추가로 …" → `➕ 이어 붙였어요` 카드 1장, Notion 행 1개만. 한국어만 보낸 수정은 전처럼 `✏️ 고쳤어요`.
 
-> 🔤 **2026-10-18 단어장 철자 자동 교정 증분 — develop PR, Prod 미반영** (브랜치 `claude/english-translation-spelling-65d7fe`).
+> 🔤 **2026-10-18 단어장 철자 자동 교정 증분 — PR #15에 포함되어 develop 머지, Prod PR #16 대기** (브랜치 `claude/english-translation-spelling-65d7fe`, PR #13은 중복으로 닫음).
 > 문제: "everiything"처럼 오타가 있는 문장을 보내면 모델은 오타를 알아채고 메모에 `철자 확인: everything`이라고 쓰는데, 표현(Notion 제목)은 오타 그대로 저장됐다.
 > 원인은 모델이 아니라 코드 — 저장 프롬프트가 교정을 note에만 쓰게 했고 응답 스키마에 고친 표현을 돌려줄 칸이 없었다(핸들러는 항상 `input.text`를 저장). 모델 교체로는 안 고쳐진다.
 > - 단어 응답(`VocabEnrichment`)에 `correctedText` 추가. 프롬프트: 오타가 있으면 **철자만** 고친 표현 전체를 넣고(단어 선택·문법·대소문자·문장부호는 그대로), 없으면 빈 문자열. note에 철자 얘기는 쓰지 않는다.
