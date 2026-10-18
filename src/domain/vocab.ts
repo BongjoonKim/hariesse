@@ -96,6 +96,47 @@ export function parseVocabMessage(message: string): VocabInput[] {
 
 export type EnrichedFields = Pick<VocabEntry, 'meaning' | 'pos' | 'pronunciation' | 'example' | 'synonyms' | 'note'>;
 
+// ---------------------------------------------------------------- 철자 교정
+
+export interface SpellingCorrection {
+  /** 저장할 표현(철자를 고친 것) */
+  text: string;
+  key: string;
+  kind: VocabKind;
+  /** 메모 맨 앞에 남길 원래 입력 기록 */
+  noteLine: string;
+}
+
+const SPELLING_NOTE_RE = /^철자 확인:[^\n]*\n?/;
+
+/**
+ * Bedrock이 철자를 고쳐 줬으면(correctedText) 그 표현으로 저장하기 위한 값. 순수함수.
+ * 대소문자·문장부호만 다른 건(dedup 키가 같은 건) 교정으로 치지 않고 사용자가 쓴 그대로 둔다.
+ * 단어 수가 같으면 바뀐 단어만 "원래 → 고침"으로, 다르면 원래 입력 전체를 메모에 남긴다.
+ */
+export function detectSpellingCorrection(original: string, e: Pick<VocabEnrichment, 'correctedText'>): SpellingCorrection | undefined {
+  const text = e.correctedText?.trim();
+  if (!text) return undefined;
+  const key = normalizeVocabKey(text);
+  if (!key || key === normalizeVocabKey(original)) return undefined;
+
+  const before = original.trim().split(/\s+/);
+  const after = text.split(/\s+/);
+  const changed = before.length === after.length
+    ? before.map((w, i) => [w, after[i]] as const).filter(([a, b]) => normalizeVocabKey(a) !== normalizeVocabKey(b))
+    : [];
+  const noteLine = changed.length
+    ? `✏️ 철자 교정: ${changed.map(([a, b]) => `${a} → ${b}`).join(', ')}`
+    : `✏️ 철자 교정 · 원래 입력: ${original.trim()}`;
+  return { text, key, kind: detectKind(text), noteLine };
+}
+
+/** 교정 기록을 메모 맨 앞에 붙인다. 모델이 예전 형식대로 쓴 "철자 확인:" 줄은 중복이라 뺀다. 순수함수. */
+export function withSpellingNote(note: string | undefined, correction: SpellingCorrection): string {
+  const rest = (note ?? '').replace(SPELLING_NOTE_RE, '').trim();
+  return rest ? `${correction.noteLine}\n${rest}` : correction.noteLine;
+}
+
 // ---------------------------------------------------------------- 수정 요청 판별
 
 /**

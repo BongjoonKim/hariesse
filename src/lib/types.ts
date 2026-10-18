@@ -102,6 +102,8 @@ export interface VocabEnrichment {
   synonyms: string[];
   /** TOEFL 팁(콜로케이션·자주 나오는 맥락) / 문장이면 핵심 표현 정리 */
   note?: string;
+  /** 입력에 오타가 있으면 철자만 고친 표현 전체. 고칠 게 없으면 비어 있다. */
+  correctedText?: string;
 }
 
 /** 사용자의 수정 요청을 반영한 카드. text는 표현 자체를 고칠 때만 (철자 등). */

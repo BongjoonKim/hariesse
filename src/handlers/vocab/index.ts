@@ -28,6 +28,8 @@ import {
   normalizeVocabKey,
   detectKind,
   fillFromEnrichment,
+  detectSpellingCorrection,
+  withSpellingNote,
   initialReview,
   applyRepeatCapture,
   applyRevision,
@@ -36,15 +38,15 @@ import {
   pickDueEntries,
   needsEnrichment,
   BOX_INTERVAL_DAYS,
-  type EnrichedFields,
 } from '../../domain/vocab';
 import { DEFAULTS } from '../../lib/constants';
-import type { VocabEntry, VocabKind } from '../../lib/types';
+import type { VocabEnrichment, VocabEntry, VocabKind } from '../../lib/types';
 
 /**
  * TOEFL 단어장 Lambda. 원본 저장소는 Notion "TOEFL Vocab" DB.
  * - capture: Feedback Lambda가 Telegram 메시지를 받아 비동기로 넘긴다 (Bedrock 호출이 webhook 응답을 막지 않게).
  *   한 줄 = 표현 1건 → 뜻·번역 채워서 Notion에 저장 → 카드로 답장. 이미 있는 표현이면 헷갈린 횟수 +1.
+ *   입력에 오타가 있으면 Bedrock이 고친 철자로 저장하고 메모 맨 앞에 원래 입력을 남긴다 (고친 철자가 이미 있으면 그 카드의 헷갈린 횟수 +1).
  * - 수정: 카드(저장·복습 메시지)에 답장으로 쓰거나, 답장 없이 한국어로 "~라는 뜻이야"라고 보내면
  *   그 표현(답장 없으면 마지막으로 저장한 표현)의 카드를 요청대로 다시 쓴다. 새 표현으로 저장하지 않는다.
  * - review: 매일 21:00 KST (EventBridge) 또는 /review 명령.
@@ -114,10 +116,8 @@ async function capture(cfg: AppConfig, text: string, messageId?: number, replyTo
   let lastPageId: string | undefined;
   for (const input of parseVocabMessage(text)) {
     try {
-      const key = normalizeVocabKey(input.text);
-      const existing = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, key);
-
-      if (existing) {
+      // 이미 있는 표현이면 헷갈린 횟수 +1 (철자를 고친 결과가 이미 있는 표현일 때도 같다)
+      const repeat = async (existing: VocabEntry): Promise<void> => {
         const fields = {
           ...applyRepeatCapture(existing, today),
           tags: [...new Set([...existing.tags, ...input.tags])],
@@ -127,14 +127,31 @@ async function capture(cfg: AppConfig, text: string, messageId?: number, replyTo
         await sendReply(botToken, cfg.telegramChatId, card, messageId, buildVocabSavedKeyboard(existing.pageId));
         result.repeated!++;
         lastPageId = existing.pageId;
+      };
+
+      const existing = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, normalizeVocabKey(input.text));
+      if (existing) {
+        await repeat(existing);
         continue;
       }
 
-      const enriched = await tryEnrich(cfg, input.text, input.kind, { meaning: input.meaning });
+      const e = await tryEnrich(cfg, input.text, input.kind, input.meaning);
+      // 오타가 있으면 고친 철자로 저장한다. 사용자가 `::`로 직접 쓴 뜻은 그대로 둔다.
+      const correction = e ? detectSpellingCorrection(input.text, e) : undefined;
+      if (correction) {
+        const dup = await findVocabByKey(notionToken, cfg.vocabNotionDatabaseId, correction.key);
+        if (dup) {
+          console.log(`vocab capture: "${input.text}" → "${correction.text}" 은 이미 있는 표현`);
+          await repeat(dup);
+          continue;
+        }
+      }
+      const enriched = e ? fillFromEnrichment({ meaning: input.meaning }, e) : undefined;
+      if (enriched && correction) enriched.note = withSpellingNote(enriched.note, correction);
       const fields: VocabFields = {
-        text: input.text,
-        key,
-        kind: input.kind,
+        text: correction?.text ?? input.text,
+        key: correction?.key ?? normalizeVocabKey(input.text),
+        kind: correction?.kind ?? input.kind,
         tags: input.tags,
         origin: 'telegram',
         ...(enriched ?? { meaning: input.meaning }),
@@ -142,8 +159,9 @@ async function capture(cfg: AppConfig, text: string, messageId?: number, replyTo
         // 뜻 채우기에 실패하면 '새로 추가'로 두고 다음 복습 실행 때 다시 채운다
         status: enriched ? 'learning' : 'new',
       };
+      if (correction) console.log(`vocab capture: 철자 교정 "${input.text}" → "${correction.text}"`);
       const pageId = await createVocabPage(notionToken, cfg.vocabNotionDatabaseId, fields);
-      const entry: VocabEntry = { pageId, tags: [], box: 0, missCount: 0, text: input.text, ...fields };
+      const entry: VocabEntry = { pageId, tags: [], box: 0, missCount: 0, text: fields.text!, ...fields };
       await sendReply(
         botToken,
         cfg.telegramChatId,
@@ -225,16 +243,15 @@ async function correct(
   }
 }
 
-/** Bedrock으로 빈 칸 채우기. 실패해도 저장은 계속하도록 undefined. */
+/** Bedrock 단어 응답. 실패해도 저장은 계속하도록 undefined. 빈 칸 채우기는 호출한 쪽에서 `fillFromEnrichment`. */
 async function tryEnrich(
   cfg: AppConfig,
   text: string,
   kind: VocabKind,
-  current: EnrichedFields
-): Promise<EnrichedFields | undefined> {
+  userMeaning: string | undefined
+): Promise<VocabEnrichment | undefined> {
   try {
-    const e = await enrichVocab(cfg.bedrockModelId, cfg.bedrockRegion, text, kind, current.meaning);
-    return fillFromEnrichment(current, e);
+    return await enrichVocab(cfg.bedrockModelId, cfg.bedrockRegion, text, kind, userMeaning);
   } catch (err) {
     console.warn(`vocab enrich 실패 "${text}": ${(err as Error).message}`);
     return undefined;
@@ -291,6 +308,7 @@ async function review(cfg: AppConfig, force: boolean): Promise<VocabResult> {
 /**
  * Notion에 직접 넣은 행(상태 빈칸)과 뜻 채우기에 실패했던 행을 채운다.
  * 복습 일정이 없으면 추가일 다음 날로 잡아준다 (어제 넣은 단어는 오늘 바로 복습 대상).
+ * 오타가 있으면 Telegram 저장과 똑같이 고친 철자로 표현을 바꾸고 메모에 원래 입력을 남긴다.
  */
 async function enrichPending(cfg: AppConfig, notionToken: string, today: string): Promise<number> {
   let pending: VocabEntry[];
@@ -305,15 +323,19 @@ async function enrichPending(cfg: AppConfig, notionToken: string, today: string)
   for (const entry of pending) {
     if (!needsEnrichment(entry)) continue;
     const kind = entry.kind ?? detectKind(entry.text);
-    const filled = await tryEnrich(cfg, entry.text, kind, entry);
-    if (!filled) continue;
+    const e = await tryEnrich(cfg, entry.text, kind, entry.meaning);
+    if (!e) continue;
+    const correction = detectSpellingCorrection(entry.text, e);
+    const filled = fillFromEnrichment(entry, e);
+    if (correction) filled.note = withSpellingNote(filled.note, correction);
     const fields: VocabFields = {
       ...filled,
-      key: entry.key ?? normalizeVocabKey(entry.text),
-      kind,
+      key: correction?.key ?? entry.key ?? normalizeVocabKey(entry.text),
+      kind: correction?.kind ?? kind,
       origin: entry.origin ?? 'notion',
       status: 'learning',
     };
+    if (correction) Object.assign(fields, { text: correction.text });
     if (!entry.nextReview) {
       Object.assign(fields, {
         box: 0,

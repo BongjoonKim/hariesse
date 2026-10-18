@@ -6,6 +6,8 @@ import {
   detectKind,
   parseVocabMessage,
   fillFromEnrichment,
+  detectSpellingCorrection,
+  withSpellingNote,
   initialReview,
   applyReview,
   applyRepeatCapture,
@@ -190,6 +192,46 @@ describe('fillFromEnrichment', () => {
 
   it('공백뿐인 칸은 빈 칸으로 본다', () => {
     expect(fillFromEnrichment({ meaning: '  ' }, e).meaning).toBe('어디에나 있는');
+  });
+});
+
+describe('철자 교정', () => {
+  const sentence = "send them to me as soon as they're done and i'll get everiything edited";
+  const fixed = "send them to me as soon as they're done and i'll get everything edited";
+
+  it('오타가 있으면 고친 표현·키·종류와 바뀐 단어 기록을 돌려준다', () => {
+    const c = detectSpellingCorrection(sentence, { correctedText: fixed });
+    expect(c).toEqual({
+      text: fixed,
+      key: normalizeVocabKey(fixed),
+      kind: 'sentence',
+      noteLine: '✏️ 철자 교정: everiything → everything',
+    });
+    expect(detectSpellingCorrection('ubiquitious', { correctedText: 'ubiquitous' })?.noteLine).toBe(
+      '✏️ 철자 교정: ubiquitious → ubiquitous'
+    );
+  });
+
+  it('단어 수가 달라지면 원래 입력 전체를 남긴다', () => {
+    const c = detectSpellingCorrection('alot of people', { correctedText: 'a lot of people' });
+    expect(c?.text).toBe('a lot of people');
+    expect(c?.noteLine).toBe('✏️ 철자 교정 · 원래 입력: alot of people');
+  });
+
+  it('고칠 게 없거나 대소문자·문장부호만 다르면 교정이 아니다', () => {
+    expect(detectSpellingCorrection('ubiquitous', {})).toBeUndefined();
+    expect(detectSpellingCorrection('ubiquitous', { correctedText: '' })).toBeUndefined();
+    expect(detectSpellingCorrection('ubiquitous', { correctedText: 'Ubiquitous.' })).toBeUndefined();
+    expect(detectSpellingCorrection('"ubiquitous"', { correctedText: 'ubiquitous' })).toBeUndefined();
+  });
+
+  it('메모 맨 앞에 교정 기록을 붙이고, 모델이 쓴 "철자 확인:" 줄은 뺀다', () => {
+    const c = detectSpellingCorrection('everiything', { correctedText: 'everything' })!;
+    expect(withSpellingNote(undefined, c)).toBe('✏️ 철자 교정: everiything → everything');
+    expect(withSpellingNote('철자 확인: everything\nevery single thing과 비슷', c)).toBe(
+      '✏️ 철자 교정: everiything → everything\nevery single thing과 비슷'
+    );
+    expect(withSpellingNote('as soon as: ~하자마자', c)).toBe('✏️ 철자 교정: everiything → everything\nas soon as: ~하자마자');
   });
 });
 
@@ -386,7 +428,13 @@ describe('Bedrock 단어 응답', () => {
       exampleKo: undefined,
       synonyms: [],
       note: 'corroborate: 뒷받침하다',
+      correctedText: undefined,
     });
+  });
+
+  it('철자를 고친 표현을 correctedText로 받는다', () => {
+    const r = parseVocabEnrichment('{"correctedText":"everything","meaning":"모든 것","synonyms":[]}');
+    expect(r.correctedText).toBe('everything');
   });
 
   it('뜻이 없으면 throw', () => {
