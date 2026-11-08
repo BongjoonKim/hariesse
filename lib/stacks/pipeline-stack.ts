@@ -21,7 +21,7 @@ export interface PipelineStackProps extends cdk.StackProps {
   stage?: string;
   /** 학습 트랙(LearnFn + 20:00 KST 스케줄) 배포 여부. 기본 true. */
   learning?: boolean;
-  /** TOEFL 단어장(VocabFn + 21:00 KST 복습 스케줄) 배포 여부. 기본 true. */
+  /** TOEFL 단어장(VocabFn + 21:00 KST 복습) + Writing 연습(WritingFn + 12:00 KST 출제) 배포 여부. 기본 true. */
   vocab?: boolean;
 }
 
@@ -34,6 +34,8 @@ export class PipelineStack extends cdk.Stack {
   readonly learnFn?: lambda.IFunction;
   /** TOEFL 단어장 Lambda — ApiStack의 Feedback Lambda가 비동기 호출한다. vocab=false면 없음. */
   readonly vocabFn?: lambda.IFunction;
+  /** TOEFL Writing Lambda — Feedback Lambda가 /writing 때 비동기 호출한다. vocab=false면 없음. */
+  readonly writingFn?: lambda.IFunction;
 
   constructor(scope: Construct, id: string, props: PipelineStackProps) {
     super(scope, id, props);
@@ -84,7 +86,11 @@ export class PipelineStack extends cdk.Stack {
     const vocabFn = vocab ? makeFn('VocabFn', 'vocab', 5, 512) : undefined;
     // 비동기 재시도 끔 — capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다.
     vocabFn?.configureAsyncInvoke({ retryAttempts: 0 });
-    const optional = [learnFn, vocabFn].filter((fn): fn is NodejsFunction => fn !== undefined);
+    // TOEFL Writing — 매일 낮 문장 5개 출제. 원본은 Notion DB. 실행 1회에 한국어·교정 채우기(Bedrock) 최대 WRITING_ENRICH_CAP건이 먼저 돌아서 넉넉히.
+    const writingFn = vocab ? makeFn('WritingFn', 'writing', 10, 512) : undefined;
+    // 재시도되면 같은 문제가 두 번 온다.
+    writingFn?.configureAsyncInvoke({ retryAttempts: 0 });
+    const optional = [learnFn, vocabFn, writingFn].filter((fn): fn is NodejsFunction => fn !== undefined);
     const bedrockFns = [curateFn, ...optional];
     const secretFns = [deliverFn, ...optional];
     const allFns = [collectFn, curateFn, deliverFn, ...optional];
@@ -117,6 +123,9 @@ export class PipelineStack extends cdk.Stack {
 
     if (vocabFn) {
       profileTable.grantReadWriteData(vocabFn); // 정기 복습 발송일 = pk 'VOCAB'
+    }
+    if (writingFn) {
+      profileTable.grantReadWriteData(writingFn); // 정기 출제일 = pk 'WRITING'
     }
 
     // Bedrock (curate, learn) — foundation model + 교차리전 추론 프로파일
@@ -190,10 +199,20 @@ export class PipelineStack extends cdk.Stack {
       new cdk.CfnOutput(this, 'VocabFunctionName', { value: vocabFn.functionName });
     }
 
+    // ---- TOEFL Writing 출제: 매일 12:00 KST (= 03:00 UTC) — 낮에 혼자 써 보는 연습 ----
+    if (writingFn) {
+      new events.Rule(this, 'DailyWritingQuizSchedule', {
+        schedule: events.Schedule.cron({ minute: '0', hour: '3' }),
+        targets: [new targets.LambdaFunction(writingFn, { retryAttempts: 0 })],
+      });
+      new cdk.CfnOutput(this, 'WritingFunctionName', { value: writingFn.functionName });
+    }
+
     this.functions = allFns;
     this.stateMachine = stateMachine;
     this.learnFn = learnFn;
     this.vocabFn = vocabFn;
+    this.writingFn = writingFn;
 
     new cdk.CfnOutput(this, 'CollectFunctionName', { value: collectFn.functionName });
     new cdk.CfnOutput(this, 'CurateFunctionName', { value: curateFn.functionName });

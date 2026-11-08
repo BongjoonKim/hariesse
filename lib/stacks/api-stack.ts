@@ -17,6 +17,8 @@ export interface ApiStackProps extends cdk.StackProps {
   stage?: string;
   /** TOEFL 단어장 Lambda (PipelineStack) — Telegram 메시지를 비동기로 넘긴다. 없으면 단어장 꺼짐. */
   vocabFn?: lambda.IFunction;
+  /** TOEFL Writing Lambda (PipelineStack) — /writing 명령을 비동기로 넘긴다. 없으면 명령 무시. */
+  writingFn?: lambda.IFunction;
 }
 
 /**
@@ -30,7 +32,7 @@ export class ApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: ApiStackProps) {
     super(scope, id, props);
 
-    const { sourcesTable, articlesTable, profileTable, rawBucket, stage, vocabFn } = props;
+    const { sourcesTable, articlesTable, profileTable, rawBucket, stage, vocabFn, writingFn } = props;
     const prefix = configPrefix(stage);
     const SECRETS = secretNames(prefix.secrets);
 
@@ -49,6 +51,7 @@ export class ApiStack extends cdk.Stack {
         [ENV.RAW_BUCKET]: rawBucket.bucketName,
         ...(stage ? { [ENV.STAGE]: stage } : {}),
         ...(vocabFn ? { [ENV.VOCAB_FUNCTION_NAME]: vocabFn.functionName } : {}),
+        ...(writingFn ? { [ENV.WRITING_FUNCTION_NAME]: writingFn.functionName } : {}),
       },
       bundling: {
         externalModules: ['@aws-sdk/*'],
@@ -78,6 +81,7 @@ export class ApiStack extends cdk.Stack {
     sourcesTable.grantReadWriteData(feedbackFn);
     profileTable.grantReadWriteData(feedbackFn);
     vocabFn?.grantInvoke(feedbackFn);
+    writingFn?.grantInvoke(feedbackFn);
 
     const fnUrl = feedbackFn.addFunctionUrl({
       authType: lambda.FunctionUrlAuthType.NONE, // 인증은 핸들러의 secret_token 검증

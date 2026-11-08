@@ -293,18 +293,44 @@ export async function getVocabReviewState(table: string): Promise<VocabReviewSta
 }
 
 /** 넘긴 필드만 갱신한다 (복습 발송일과 마지막 저장 표현이 서로를 지우지 않게). */
-export async function updateVocabReviewState(
+export function updateVocabReviewState(
   table: string,
   patch: Partial<Omit<VocabReviewState, 'pk'>> & Pick<VocabReviewState, 'updatedAt'>
 ): Promise<void> {
+  return mergeStateItem(table, 'VOCAB', patch);
+}
+
+/** Profile 테이블의 상태 아이템에 넘긴 키만 SET 머지 (다른 키는 보존). undefined는 건너뛴다. */
+async function mergeStateItem(table: string, pk: string, patch: Record<string, unknown>): Promise<void> {
   const entries = Object.entries(patch).filter(([, v]) => v !== undefined);
   await doc.send(
     new UpdateCommand({
       TableName: table,
-      Key: { pk: 'VOCAB' },
+      Key: { pk },
       UpdateExpression: `SET ${entries.map(([k]) => `#${k} = :${k}`).join(', ')}`,
       ExpressionAttributeNames: Object.fromEntries(entries.map(([k]) => [`#${k}`, k])),
       ExpressionAttributeValues: Object.fromEntries(entries.map(([k, v]) => [`:${k}`, v])),
     })
   );
+}
+
+// ---- TOEFL Writing 출제 상태 (Profile 테이블의 pk='WRITING' 아이템) ----
+
+export interface WritingQuizState {
+  pk: 'WRITING';
+  /** 정기 출제를 마지막으로 보낸 날 (KST YYYY-MM-DD) — 같은 날 중복 발송 방지 */
+  lastSentDate?: string;
+  updatedAt: string;
+}
+
+export async function getWritingQuizState(table: string): Promise<WritingQuizState | undefined> {
+  const res = await doc.send(new GetCommand({ TableName: table, Key: { pk: 'WRITING' } }));
+  return res.Item as WritingQuizState | undefined;
+}
+
+export function updateWritingQuizState(
+  table: string,
+  patch: Partial<Omit<WritingQuizState, 'pk'>> & Pick<WritingQuizState, 'updatedAt'>
+): Promise<void> {
+  return mergeStateItem(table, 'WRITING', patch);
 }
