@@ -21,7 +21,10 @@ export const WRITING_STATUS_LABEL: Record<WritingStatus, string> = {
   excluded: '제외',
 };
 
-/** 채워야 하는 행: 문장이 있고, 제외가 아니며, 상태가 비었거나(Notion에 직접 입력) '새로 추가'거나 한국어가 빈 것. */
+/**
+ * 채워야 하는 행: 문장이 있고, 제외가 아니며, 상태가 비었거나(Notion에 직접 입력) '새로 추가'거나 한국어가 빈 것.
+ * 채운 뒤에는 핸들러가 상태를 '출제 중'으로 바꿔야 한다 — 안 그러면 매 실행마다 같은 행을 또 채운다.
+ */
 export function needsWritingEnrichment(entry: Pick<WritingEntry, 'text' | 'status' | 'korean'>): boolean {
   if (entry.text.trim() === '' || entry.status === 'excluded') return false;
   return entry.status === undefined || entry.status === 'new' || !entry.korean?.trim();

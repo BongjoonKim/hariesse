@@ -118,10 +118,11 @@ async function enrichPending(cfg: AppConfig, notionToken: string): Promise<numbe
       continue;
     }
     const filled = fillWritingFromEnrichment(entry, { ...e, corrected: detectWritingCorrection(entry.text, e.corrected) });
+    // 채우고 나면 '출제 중'으로 — '새로 추가'로 두면 다음 실행 때 또 채우기 대상이 되어 Bedrock을 반복 호출한다 (2026-11-08 실측 버그)
     const fields: WritingFields = {
       ...filled,
       key: entry.key ?? normalizeWritingKey(entry.text),
-      status: entry.status === 'active' ? 'active' : 'new',
+      status: 'active',
       quizCount: entry.quizCount,
     };
     try {
