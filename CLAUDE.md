@@ -10,8 +10,9 @@
 > **2026-09-30 학습 트랙 증분: 매일 20:00 KST 기술 레슨 1건(Telegram + Notion 학습노트) — 2026-10-04 배포·E2E 검증 완료.**
 > **2026-10-11 TOEFL 단어장 증분: Telegram/Notion에 적으면 뜻 채우고 매일 21:00 KST 간격 반복 복습 — 2026-10-11 배포 (HANDOFF 맨 위 블록).**
 > **2026-10-17 단어장 뜻 수정: 카드에 답장하거나 한국어로 "~라는 뜻이야"라고 보내면 새 표현 대신 그 카드를 고친다 — 2026-10-17 배포 완료.**
-> **2026-10-18 단어장 철자 자동 교정: 확실한 오타는 고친 철자로 저장한다(새 저장·수정·이어 붙이기 모두). 원문은 남기지 않고 Telegram 카드에만 `✏️ 철자 교정: a → b` 한 줄 — develop PR #15, Prod 미반영.**
-> **2026-10-18 단어장 의도 분류: 한글이 섞인 메시지는 새 표현/수정/이어 붙이기(append)로 Bedrock이 분류하고, "아까 문장에 추가로 …"는 마지막 카드에 이어 붙인다 — develop PR(철자 교정 PR #13 포함), Prod 미반영.**
+> **2026-10-18 단어장 철자 자동 교정: 확실한 오타는 고친 철자로 저장한다(새 저장·수정·이어 붙이기 모두). 원문은 남기지 않고 Telegram 카드에만 `✏️ 철자 교정: a → b` 한 줄 — develop 머지(#15), Prod 배포됨(#16).**
+> **2026-10-18 단어장 의도 분류: 한글이 섞인 메시지는 새 표현/수정/이어 붙이기(append)로 Bedrock이 분류하고, "아까 문장에 추가로 …"는 마지막 카드에 이어 붙인다 — develop 머지(#15, 철자 교정 #13 포함), Prod 배포됨(#16).**
+> **2026-11-08 TOEFL Writing 문장 연습: Notion "TOEFL Writing"에 영어 문장을 적으면 매일 12:00 KST에 5문장씩 한국어 문제(영어 정답은 스포일러) — develop PR, Prod 미반영 (HANDOFF 맨 위 블록).**
 > **⚠️ 작업이 끝나면 반드시 push + develop PR까지. 미머지 PR이 있으면 먼저 확인(2026-10-18, PR #13이 머지 안 된 채 #14가 배포된 사례).**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자 — 10/10 배포, 10/16 develop에 합침.**
@@ -43,7 +44,7 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
   (CI가 Prod 배포 때 `deploy:design`도 실행한다 — 로컬에서 돌리지 말 것).
   `operator=true`는 `OperatorStack`(운영 전용 IAM 사용자 + 접두어 범위 정책)을 만든다. `-c operatorDeploy=true`를 주면 CDK 배포 권한까지 붙지만 기본은 끔.
 - 시드도 세트로 나뉜다: `npm run seed`(내 것) / `npm run seed:design`(디자인). **테이블 이름이 어느 stage 것인지 확인하고 실행.**
-- `-c vocab=false`: VocabFn + 21:00 복습 스케줄 생략, Feedback Lambda에 `VOCAB_FUNCTION_NAME`이 없어 메시지는 무시. TOEFL 단어장은 내 배포 전용.
+- `-c vocab=false`: VocabFn + 21:00 복습 스케줄, WritingFn + 12:00 출제 스케줄 생략. Feedback Lambda에 `VOCAB_FUNCTION_NAME`/`WRITING_FUNCTION_NAME`이 없어 메시지·`/writing`은 무시. TOEFL 단어장·Writing은 내 배포 전용.
 - 카테고리 `design` 추가됨. 큐레이션 프롬프트에 SSM `user-persona`(사용자 소개)가 들어간다(없으면 생략).
 
 ## 현재 상태: Phase 1 + Feedback + 소스 확장
@@ -59,6 +60,9 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
   Bedrock이 빈 칸(뜻/번역·품사·예문·동의어·TOEFL 팁)을 채운다. 매일 21:00 KST에 복습 퀴즈(뜻은 스포일러)
   `[✅ 알아요][❌ 몰라요]` → Leitner 박스(1·3·7·14·30일). **원본 저장소는 Notion DB** (DynamoDB에 따로 두지 않음).
   뜻이 틀리면 카드에 **답장**하거나 답장 없이 한국어로 고쳐 달라고 하면(24시간 안 마지막 저장 표현) Bedrock이 카드를 다시 쓴다.
+- **TOEFL Writing 문장 연습**: Notion "TOEFL Writing" DB에 `문장`(교재 연습하며 쓴 영어)만 적으면 Bedrock이 `한국어`(문제)·`교정`(문법·철자 고친 모범 문장)·`메모`를
+  채우고, 매일 12:00 KST에 덜 나온 문장부터 5개를 한 메시지로 보낸다 — 한국어만 보이고 영어는 `<tg-spoiler>`. 버튼·채점 없음. `/writing` = 지금 바로.
+  **원본 저장소는 Notion DB**. `상태=제외`면 출제 안 함. 사용자가 직접 쓴 한국어·교정은 덮지 않는다.
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 
@@ -67,8 +71,9 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
 - **PipelineStack**: Lambda 3개(collect/curate/deliver) + Step Functions(순차) + EventBridge(매일 07:00 KST = 22:00 UTC).
   + LearnFn(학습 레슨) + 별도 EventBridge(매일 20:00 KST = 11:00 UTC). SFN 밖에서 독립 실행.
   + VocabFn(TOEFL 단어장: capture/review) + EventBridge(매일 21:00 KST = 12:00 UTC).
+  + WritingFn(TOEFL Writing 출제) + EventBridge(매일 12:00 KST = 03:00 UTC).
 - **ApiStack**: Feedback Lambda + Function URL(Telegram webhook, secret_token 헤더 인증).
-  버튼(callback_query) + 메시지(message → VocabFn 비동기 호출). VocabFn은 PipelineStack에 있고 cross-stack으로 넘긴다.
+  버튼(callback_query) + 메시지(message → VocabFn 비동기 호출, `/writing` → WritingFn). 둘 다 PipelineStack에 있고 cross-stack으로 넘긴다.
 - **LLM**: Amazon Bedrock(Claude), 서울 리전 ap-northeast-2. 모델 ID는 SSM 분리, 교차리전 추론 프로파일(`apac.*`).
 
 ## 데이터 흐름
@@ -99,7 +104,10 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - `src/domain/learning.ts` — 진도 계산/레슨 버튼/관련 글 선택(순수함수, 테스트 대상).
 - `src/domain/vocab.ts` — 단어장 입력 파싱/정규화 키/Leitner 복습/callback(순수함수, 테스트 대상).
 - `src/lib/notion-vocab.ts` — "TOEFL Vocab" DB 속성 매핑(`VOCAB_PROP`) + 조회/생성/갱신. 속성 이름 = 스키마.
-- `src/handlers/{collect,curate,deliver,feedback,learn,vocab}/index.ts` — Lambda 핸들러.
+  `notionFetch`/`queryDatabase`/속성 파서는 export — Writing DB도 같이 쓴다.
+- `src/domain/writing.ts` — Writing 문장 연습: 채우기 대상/교정 판별/출제 순서(순수함수, 테스트 대상).
+- `src/lib/notion-writing.ts` — "TOEFL Writing" DB 속성 매핑(`WRITING_PROP`) + 조회/갱신.
+- `src/handlers/{collect,curate,deliver,feedback,learn,vocab,writing}/index.ts` — Lambda 핸들러.
 
 ## 코딩 규칙 / 가드레일
 - **dedup·idempotency**: articleId = `hashUrl(url)`. collect는 `putArticleIfNew`(조건부 put), Notion은 URL 기준 upsert.
@@ -127,18 +135,23 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - **단어장 철자 교정은 표현에 반영하되 원문은 남기지 않는다**: Bedrock 응답 `correctedText`(또는 수정 결과 `text`)가 철자만 다르면 고친 철자로 표현·키·종류를 저장한다(`detectSpellingCorrection`, `spellingOfRevision`).
   Notion 메모에 원문·교정 기록을 쓰지 말 것(사용자 결정 2026-10-18). 카드 안내 한 줄만. 고유명사·구어체·고의적 표기는 교정하지 않도록 프롬프트에 명시되어 있다 — 풀지 말 것.
   dedup 키가 같은 차이(대소문자·문장부호)는 교정이 아니다. 고친 철자가 이미 있는 표현이면 새 행을 만들지 말고 그 카드의 헷갈린 횟수 +1.
-- **VocabFn 비동기 재시도 0회**: capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다.
+- **VocabFn 비동기 재시도 0회**: capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다. WritingFn도 0회(같은 문제가 두 번 온다).
+- **Writing 교정은 문장 자체를 바꾸지 않는다**: `문장`은 사용자가 쓴 그대로 두고 `교정` 칸에 모범 문장을 넣는다(단어장 철자 교정과 다름 — 쓴 것과 고친 것을 비교하는 게 연습이라서).
+  대소문자·앞뒤 문장부호만 다른 교정은 버린다(`detectWritingCorrection`). 출제 상태 기록은 `applyQuizSent` 필드만 PATCH — 사용자가 손댄 칸을 다시 쓰지 않게.
 - **SSM GetParameters는 1회 10개까지**: `getConfig()`가 10개씩 나눠 조회한다. SSM 이름을 늘려도 그대로 둘 것.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.
 
 ## 설정값 위치
 - SSM `/hariesse/*`: bedrock-model-id, bedrock-region, exploration-ratio, notion-database-id,
   telegram-chat-id, daily-bedrock-cap, daily-curate-cap, digest-size, digest-min-size, digest-min-score,
-  vocab-notion-database-id(비면 단어장 꺼짐), vocab-review-size(기본 10).
+  vocab-notion-database-id(비면 단어장 꺼짐), vocab-review-size(기본 10),
+  writing-notion-database-id(비면 Writing 꺼짐), writing-quiz-size(기본 5).
 - 다이제스트 건수: 점수 ≥ `digest-min-score`(기본 70)인 글 수를 [`digest-min-size`(2), `digest-size`(4)]로 클램프.
 - Secrets `hariesse/telegram-bot-token`, `hariesse/notion-token`.
 - Notion DB ID (생성됨): `a22cbf53637840dc867d6cd8e7b2614e` (봉준 개발목록(구 My secretary) 페이지 하위, DB명 "hariesse Archive").
-- TOEFL 단어장 Notion DB: `5582e65c809b45e1b420325db9fc9adb` (같은 페이지 하위, DB명 "TOEFL Vocab").
+- TOEFL 단어장 Notion DB: `5582e65c809b45e1b420325db9fc9adb` (DB명 "TOEFL Vocab"). **2026-11-08부터 "Haries Story / Toefl" 페이지(`40be549ed102806f9a4ed680d0ff9ad4`) 하위.**
+- TOEFL Writing Notion DB: `205a87eb3c20434b896d33213d051501` (DB명 "TOEFL Writing", 같은 Toefl 페이지 하위).
+  hariesse Notion 연동은 봉준 개발목록과 Toefl 페이지 두 곳에 연결돼 있다 — Toefl 페이지 연결을 끊으면 단어장·Writing이 멈춘다.
 
 ## 배포 / 검증
 ```

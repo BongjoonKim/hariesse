@@ -56,6 +56,7 @@ const api = new ApiStack(app, `${P}Api`, {
   profileTable: data.profileTable,
   rawBucket: data.rawBucket,
   vocabFn: pipeline.vocabFn,
+  writingFn: pipeline.writingFn,
 });
 
 if (operator) {

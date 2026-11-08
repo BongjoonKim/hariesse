@@ -2,6 +2,30 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
+> ✍️ **2026-11-08 TOEFL Writing 문장 연습 증분 — develop PR, Prod 미반영** (브랜치 `claude/toefl-writing-sentences-13f331`).
+> 목적: 사용자가 TOEFL Writing 교재("한국어 → 영어로 쓰기" 연습)를 풀며 쓴 영어 문장을 모아 두고, 매일 낮에 5문장씩
+> **한국어만 보여 주고 영어로 써 보게** 하는 문제를 Telegram으로 보낸다. 영어 정답은 스포일러로 가린다. 버튼·채점은 없다(사용자 요청: 가리기만).
+> - **원본 저장소 = Notion DB "TOEFL Writing"** (`205a87eb3c20434b896d33213d051501`, 데이터소스 `c27b9040-…`).
+>   사용자의 원래 메모 페이지 "Haries Story / Toefl / Writing"(`40be549ed102801c9151c3633388d771`)의 문장 70개(Power Test 2 p70 ×10, Check-up p82·p92·p102 ×20)를 행으로 옮겼다.
+>   처음엔 봉준 개발목록(`38de549e…`) 아래 만들었다 — hariesse Notion 연동이 거기만 접근됐고 사용자의 Toefl 페이지(`40be549ed102806f9a4ed680d0ff9ad4`)는 404였다.
+>   **2026-11-08 사용자가 Toefl 페이지에 hariesse를 연결한 뒤 두 DB("TOEFL Vocab"·"TOEFL Writing")를 "Haries Story / Toefl" 아래로 옮김.** DB id는 그대로라 코드·SSM 변경 없음.
+>   옮긴 뒤 Lambda 토큰으로 두 DB 조회·query 200 확인. (연결을 끊으면 단어장·Writing 둘 다 멈춘다 — Toefl 페이지의 ⋯ → 연결에 hariesse가 있어야 한다.)
+> - 속성: `문장`(title, 사용자가 쓴 그대로) / `한국어`(문제) / `교정`(문법·철자 고친 모범 문장, 없으면 빈칸) / `메모`(왜 고쳤나·핵심 표현) / `출처` / `번호` / `상태`(새로 추가·출제 중·제외) / `출제 횟수` / `마지막 출제` / `키`.
+>   사용자는 `문장`만 적으면 된다. `한국어`·`교정`·`메모`는 빈 칸만 채운다(직접 쓴 건 안 덮음). `제외`로 바꾸면 출제에서 빠진다.
+> - `WritingFn`(`src/handlers/writing`) + EventBridge **매일 12:00 KST (03:00 UTC)**. ① `한국어`가 빈 행을 Bedrock으로 채움(1회 최대 `WRITING_ENRICH_CAP`=30)
+>   ② `pickQuizEntries`: 출제 횟수 적은 순 → 마지막 출제 오래된 순(안 나온 것 먼저) → 추가 순으로 `writing-quiz-size`(SSM, 기본 5)개 → 메시지 1개(넘치면 분할)
+>   ③ 보낸 행의 `출제 횟수 +1`·`마지막 출제`·`상태=출제 중`. 같은 KST 날짜엔 1번(Profile `pk='WRITING'`). `/writing` = 지금 바로(정기 기록 안 건드림), `{"enrichOnly":true}` = 채우기만(운영용).
+> - 교정 판별 `detectWritingCorrection`: 대소문자·앞뒤 문장부호만 다르면 교정 아님(정답 = 쓴 그대로). 정답 스포일러 = 교정본 + `✏️ 내가 쓴 것: …` + `💡 메모`.
+> - 공유 리팩터: `notion-vocab.ts`의 `notionFetch`/`queryDatabase`/속성 파서 export, `dynamo.ts`의 상태 머지 `mergeStateItem`(VOCAB·WRITING 공용).
+>   Feedback Lambda 환경변수 `WRITING_FUNCTION_NAME`(없으면 `/writing` 무시). `-c vocab=false`면 WritingFn도 안 만든다(TOEFL = 내 배포 전용).
+> - 실행 기록(2026-11-08, Mac, 로컬 핸들러 직접 호출 — 배포 아님): SSM `/hariesse/writing-notion-database-id` 등록.
+>   `enrichOnly`로 채움(30행 1분 50초). 교정 예: "could't → couldn't", "finialized → finalized", "I'm appreciate → I appreciate", "errors has → errors have".
+>   ⚠️ 처음 구현은 채운 뒤 상태를 '새로 추가'로 둬서 **매 실행마다 같은 30행을 다시 채웠다**(Bedrock 90회 낭비, 값은 빈 칸만 채우므로 안 바뀜) → 채우면 '출제 중'으로 바꾸게 고침.
+>   고친 뒤 `enrichOnly` 3회(30+30+5)로 70행 전부 채움(API로 `한국어` 비어 있지 않은 행 70개 확인; 교정이 붙은 행 24개). `{"force":true}` 1회로 Telegram 문제 5건(p70 #1~5) 발송, Notion `출제 횟수=1`·`마지막 출제=2026-11-08`·`상태=출제 중` 갱신 확인.
+>   내일 12:00 정기 발송은 **Prod 배포 전엔 안 온다**(Lambda가 아직 없음).
+> - 검증: `tsc`, 단위테스트 184개(신규 21), `cdk synth` 성공(스케줄 cron 4개: 22·11·12·03 UTC).
+> - **남은 일**: develop PR 머지 → Prod 머지(자동 배포) → 다음 날 12:00 KST 정기 발송 확인. 배포 전엔 Lambda가 없으니 정기 발송은 안 온다.
+
 > ✅ **2026-07-20 배포 완료 + E2E 성공.** §4의 배포 절차는 전부 실행됐다.
 > 실제 파이프라인 1회 실행으로 Telegram 다이제스트 전송 + Notion 8건 아카이브 확인.
 > 배포 중 수정한 것 (아래 §8 함정 메모에도 반영):
@@ -52,7 +76,8 @@
 > - 소스 23개 중 22개 active (우아한형제들 muted). 매일 2개 실패하던 것 처리함 — 우아한형제들 403은 비활성화, Reddit 429는 재시도 정책 수정.
 > - 학습 연계 소스 10건은 10/4 seed 직후라 아직 한 번도 수집 안 됨 → 10/5 07:00 첫 수집.
 
-> 🧭 **2026-10-18 단어장 의도 분류 증분(새 표현 / 수정 / 이어 붙이기) — develop PR, Prod 미반영** (브랜치 `claude/fervent-banach-7d1908`, 아래 철자 교정 브랜치(PR #13)를 합쳐서 한 PR로 올림).
+> 🧭 **2026-10-18 단어장 의도 분류 증분(새 표현 / 수정 / 이어 붙이기) — PR #15 develop 머지(22fc105), Prod PR #16 대기** (브랜치 `claude/fervent-banach-7d1908`, 철자 교정 PR #13을 합쳐 포함 → #13은 닫음).
+>   잘못 생성된 Notion 행("아까 문장에 추가로 …")은 사용자 확인 후 휴지통으로 이동(2026-10-18). **Prod 머지 = 배포 → 폰 E2E가 남은 일.**
 > 문제: 20:36에 "that also happens to be our Wind & appetizer Special night"를 저장하고 20:40에 "아까 문장에 추가로 which offers a 5 percent discout on all appetizers and select winds"를 보냈더니
 > 영문이 한글보다 많아 `isCorrectionRequest`가 false → **한국어 접두어까지 포함한 새 카드**가 생겼다. "앞 문장에 이어 붙여라"는 의도 자체가 코드에 없었다.
 > - 의도 3종 `VocabIntent = new | revise | append` (`types.ts`). 분기는 `capture()`:
@@ -70,7 +95,7 @@
 >   **규칙: 작업이 끝나면 push + develop PR까지 올리고, 미머지 PR이 있으면 먼저 확인한다. 배포는 develop→Prod 머지로만.**
 > - 남은 확인(Prod 머지 후 폰에서 E2E): 영어 문장 저장 → "아까 문장에 추가로 …" → `➕ 이어 붙였어요` 카드 1장, Notion 행 1개만. 한국어만 보낸 수정은 전처럼 `✏️ 고쳤어요`.
 
-> 🔤 **2026-10-18 단어장 철자 자동 교정 증분 — develop PR, Prod 미반영** (브랜치 `claude/english-translation-spelling-65d7fe`).
+> 🔤 **2026-10-18 단어장 철자 자동 교정 증분 — PR #15에 포함되어 develop 머지, Prod PR #16 대기** (브랜치 `claude/english-translation-spelling-65d7fe`, PR #13은 중복으로 닫음).
 > 문제: "everiything"처럼 오타가 있는 문장을 보내면 모델은 오타를 알아채고 메모에 `철자 확인: everything`이라고 쓰는데, 표현(Notion 제목)은 오타 그대로 저장됐다.
 > 원인은 모델이 아니라 코드 — 저장 프롬프트가 교정을 note에만 쓰게 했고 응답 스키마에 고친 표현을 돌려줄 칸이 없었다(핸들러는 항상 `input.text`를 저장). 모델 교체로는 안 고쳐진다.
 > - 단어 응답(`VocabEnrichment`)에 `correctedText` 추가. 프롬프트: 오타가 있으면 **철자만** 고친 표현 전체를 넣고(단어 선택·문법·대소문자·문장부호는 그대로), 없으면 빈 문자열. note에 철자 얘기는 쓰지 않는다.

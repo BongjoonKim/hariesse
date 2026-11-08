@@ -16,6 +16,7 @@ import { getVocabPage, updateVocabPage, archiveVocabPage } from '../../lib/notio
 import { ENV } from '../../lib/constants';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import type { VocabEvent } from '../vocab';
+import type { WritingEvent } from '../writing';
 
 /**
  * Telegram webhook 수신 (Lambda Function URL).
@@ -196,13 +197,23 @@ const VOCAB_HELP = [
   '"아까 문장에 추가로 which offers …"처럼 보내면 새 카드 대신 그 문장 뒤에 이어 붙여요.',
   '',
   '매일 21:00에 복습 퀴즈가 와요. 지금 복습하려면 /review',
+  '',
+  '✍️ <b>TOEFL Writing</b> — Notion "TOEFL Writing"에 영어 문장을 적어 두면 매일 12:00에 5문장씩 한국어 문제가 와요 (정답은 스포일러). 지금 받으려면 /writing',
 ].join('\n');
 
 let lambdaClient: LambdaClient | undefined;
 
-async function invokeVocab(payload: VocabEvent): Promise<void> {
-  const functionName = process.env[ENV.VOCAB_FUNCTION_NAME];
-  if (!functionName) throw new Error(`Missing env var: ${ENV.VOCAB_FUNCTION_NAME}`);
+function invokeVocab(payload: VocabEvent): Promise<void> {
+  return invokeAsync(ENV.VOCAB_FUNCTION_NAME, payload);
+}
+
+function invokeWriting(payload: WritingEvent): Promise<void> {
+  return invokeAsync(ENV.WRITING_FUNCTION_NAME, payload);
+}
+
+async function invokeAsync(envKey: string, payload: unknown): Promise<void> {
+  const functionName = process.env[envKey];
+  if (!functionName) throw new Error(`Missing env var: ${envKey}`);
   lambdaClient ??= new LambdaClient({});
   await lambdaClient.send(
     new InvokeCommand({
@@ -245,6 +256,9 @@ async function handleMessage(msg: NonNullable<TelegramUpdate['message']>): Promi
       const command = text.split(/[\s@]/)[0].toLowerCase();
       if (command === '/review') {
         await invokeVocab({ type: 'review', force: true });
+      } else if (command === '/writing') {
+        if (process.env[ENV.WRITING_FUNCTION_NAME]) await invokeWriting({ force: true });
+        else await reply('✍️ Writing 연습이 꺼져 있어요.');
       } else {
         await reply(VOCAB_HELP);
       }
