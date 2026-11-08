@@ -5,10 +5,11 @@
 > ✍️ **2026-11-08 TOEFL Writing 문장 연습 증분 — develop PR, Prod 미반영** (브랜치 `claude/toefl-writing-sentences-13f331`).
 > 목적: 사용자가 TOEFL Writing 교재("한국어 → 영어로 쓰기" 연습)를 풀며 쓴 영어 문장을 모아 두고, 매일 낮에 5문장씩
 > **한국어만 보여 주고 영어로 써 보게** 하는 문제를 Telegram으로 보낸다. 영어 정답은 스포일러로 가린다. 버튼·채점은 없다(사용자 요청: 가리기만).
-> - **원본 저장소 = Notion DB "TOEFL Writing"** (`205a87eb3c20434b896d33213d051501`, 데이터소스 `c27b9040-…`), 부모 = 봉준 개발목록(`38de549e…`, TOEFL Vocab과 같은 위치).
+> - **원본 저장소 = Notion DB "TOEFL Writing"** (`205a87eb3c20434b896d33213d051501`, 데이터소스 `c27b9040-…`).
 >   사용자의 원래 메모 페이지 "Haries Story / Toefl / Writing"(`40be549ed102801c9151c3633388d771`)의 문장 70개(Power Test 2 p70 ×10, Check-up p82·p92·p102 ×20)를 행으로 옮겼다.
->   **hariesse Notion 연동은 봉준 개발목록 아래만 접근된다** — 사용자의 Toefl 페이지(`40be549ed102806f9a4ed680d0ff9ad4`)는 404(연결 안 됨). 그래서 DB를 거기 두지 않았다.
->   사용자가 Toefl 페이지 ⋯ → 연결에 hariesse를 추가하면 두 DB(Vocab·Writing)를 거기로 옮겨도 된다(DB id는 안 바뀌므로 코드 변경 없음).
+>   처음엔 봉준 개발목록(`38de549e…`) 아래 만들었다 — hariesse Notion 연동이 거기만 접근됐고 사용자의 Toefl 페이지(`40be549ed102806f9a4ed680d0ff9ad4`)는 404였다.
+>   **2026-11-08 사용자가 Toefl 페이지에 hariesse를 연결한 뒤 두 DB("TOEFL Vocab"·"TOEFL Writing")를 "Haries Story / Toefl" 아래로 옮김.** DB id는 그대로라 코드·SSM 변경 없음.
+>   옮긴 뒤 Lambda 토큰으로 두 DB 조회·query 200 확인. (연결을 끊으면 단어장·Writing 둘 다 멈춘다 — Toefl 페이지의 ⋯ → 연결에 hariesse가 있어야 한다.)
 > - 속성: `문장`(title, 사용자가 쓴 그대로) / `한국어`(문제) / `교정`(문법·철자 고친 모범 문장, 없으면 빈칸) / `메모`(왜 고쳤나·핵심 표현) / `출처` / `번호` / `상태`(새로 추가·출제 중·제외) / `출제 횟수` / `마지막 출제` / `키`.
 >   사용자는 `문장`만 적으면 된다. `한국어`·`교정`·`메모`는 빈 칸만 채운다(직접 쓴 건 안 덮음). `제외`로 바꾸면 출제에서 빠진다.
 > - `WritingFn`(`src/handlers/writing`) + EventBridge **매일 12:00 KST (03:00 UTC)**. ① `한국어`가 빈 행을 Bedrock으로 채움(1회 최대 `WRITING_ENRICH_CAP`=30)

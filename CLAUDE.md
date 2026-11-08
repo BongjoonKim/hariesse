@@ -149,8 +149,9 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - 다이제스트 건수: 점수 ≥ `digest-min-score`(기본 70)인 글 수를 [`digest-min-size`(2), `digest-size`(4)]로 클램프.
 - Secrets `hariesse/telegram-bot-token`, `hariesse/notion-token`.
 - Notion DB ID (생성됨): `a22cbf53637840dc867d6cd8e7b2614e` (봉준 개발목록(구 My secretary) 페이지 하위, DB명 "hariesse Archive").
-- TOEFL 단어장 Notion DB: `5582e65c809b45e1b420325db9fc9adb` (같은 페이지 하위, DB명 "TOEFL Vocab").
-- TOEFL Writing Notion DB: `205a87eb3c20434b896d33213d051501` (같은 페이지 하위, DB명 "TOEFL Writing"). hariesse 연동은 이 페이지 아래만 접근된다.
+- TOEFL 단어장 Notion DB: `5582e65c809b45e1b420325db9fc9adb` (DB명 "TOEFL Vocab"). **2026-11-08부터 "Haries Story / Toefl" 페이지(`40be549ed102806f9a4ed680d0ff9ad4`) 하위.**
+- TOEFL Writing Notion DB: `205a87eb3c20434b896d33213d051501` (DB명 "TOEFL Writing", 같은 Toefl 페이지 하위).
+  hariesse Notion 연동은 봉준 개발목록과 Toefl 페이지 두 곳에 연결돼 있다 — Toefl 페이지 연결을 끊으면 단어장·Writing이 멈춘다.
 
 ## 배포 / 검증
 ```
