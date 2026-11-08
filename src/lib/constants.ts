@@ -19,6 +19,8 @@ export const ENV = {
   STAGE: 'HARIESSE_STAGE',
   /** Feedback Lambda → TOEFL 단어장 Lambda 비동기 호출용. 없으면 단어장 꺼짐. */
   VOCAB_FUNCTION_NAME: 'VOCAB_FUNCTION_NAME',
+  /** Feedback Lambda → TOEFL Writing Lambda 비동기 호출용(/writing). 없으면 Writing 연습 꺼짐. */
+  WRITING_FUNCTION_NAME: 'WRITING_FUNCTION_NAME',
 } as const;
 
 /** stage → SSM/Secrets 접두어. stage가 없거나 빈 문자열이면 기존 이름 그대로. */
@@ -54,6 +56,9 @@ export function ssmPaths(prefix: string) {
     // TOEFL 단어장
     VOCAB_NOTION_DATABASE_ID: `${prefix}/vocab-notion-database-id`,
     VOCAB_REVIEW_SIZE: `${prefix}/vocab-review-size`,
+    // TOEFL Writing 문장 연습
+    WRITING_NOTION_DATABASE_ID: `${prefix}/writing-notion-database-id`,
+    WRITING_QUIZ_SIZE: `${prefix}/writing-quiz-size`,
   } as const;
 }
 
@@ -87,4 +92,7 @@ export const DEFAULTS = {
   // TOEFL 단어장: 하루 복습 퀴즈 수 / 복습 실행 1회당 뜻 채우기(Bedrock) 상한
   VOCAB_REVIEW_SIZE: 10,
   VOCAB_ENRICH_CAP: 20,
+  // TOEFL Writing: 하루 문제 수 / 실행 1회당 한국어·교정 채우기(Bedrock) 상한
+  WRITING_QUIZ_SIZE: 5,
+  WRITING_ENRICH_CAP: 30,
 } as const;

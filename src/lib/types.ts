@@ -125,6 +125,43 @@ export interface VocabIntentResult {
   instruction?: string;
 }
 
+// ---------------------------------------------------------------- TOEFL Writing
+
+/** new = 아직 한국어·교정을 안 채움, active = 출제 중, excluded = 사용자가 뺀 문장(출제 안 함) */
+export type WritingStatus = 'new' | 'active' | 'excluded';
+
+/** Bedrock이 채우는 Writing 문장 정보. korean = 문제로 나갈 한국어 뜻. */
+export interface WritingEnrichment {
+  korean: string;
+  /** 문법·철자를 고친 모범 문장. 고칠 게 없으면 비어 있다. */
+  corrected?: string;
+  /** 무엇을 왜 고쳤는지 / 기억할 표현 */
+  note?: string;
+}
+
+/** Notion "TOEFL Writing" DB 한 행. 사용자가 공부하며 쓴 영어 문장 — Notion이 원본 저장소다. */
+export interface WritingEntry {
+  /** Notion page id (하이픈 없는 32자) */
+  pageId: string;
+  /** 사용자가 쓴 문장 그대로 */
+  text: string;
+  key?: string;
+  /** 문제(한국어 → 영어로 써 보기) */
+  korean?: string;
+  /** 고친 모범 문장. 없으면 text가 곧 정답 */
+  corrected?: string;
+  note?: string;
+  /** 교재 출처 (예: "Check-up (p82)") */
+  source?: string;
+  /** 출처 안의 순서 */
+  order?: number;
+  status?: WritingStatus;
+  quizCount: number;
+  /** KST YYYY-MM-DD */
+  lastQuizzed?: string;
+  createdDate?: string;
+}
+
 /** Notion "TOEFL Vocab" DB 한 행. Notion이 원본 저장소다. */
 export interface VocabEntry {
   /** Notion page id (하이픈 없는 32자) */

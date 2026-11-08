@@ -32,6 +32,9 @@ export interface AppConfig {
   /** TOEFL 단어장 Notion DB. 비어 있으면 단어장 기능 꺼짐. */
   vocabNotionDatabaseId: string;
   vocabReviewSize: number;
+  /** TOEFL Writing Notion DB. 비어 있으면 Writing 연습 꺼짐. */
+  writingNotionDatabaseId: string;
+  writingQuizSize: number;
 }
 
 /** SSM GetParameters 1회 호출당 이름 개수 상한 (AWS API 제약). */
@@ -68,6 +71,8 @@ export async function getConfig(): Promise<AppConfig> {
     SSM.DIGEST_MIN_SCORE,
     SSM.VOCAB_NOTION_DATABASE_ID,
     SSM.VOCAB_REVIEW_SIZE,
+    SSM.WRITING_NOTION_DATABASE_ID,
+    SSM.WRITING_QUIZ_SIZE,
   ];
 
   // GetParameters는 한 번에 최대 10개 — 넘으면 ValidationException. 10개씩 나눠 조회한다.
@@ -97,6 +102,8 @@ export async function getConfig(): Promise<AppConfig> {
     digestMinScore: num(p[SSM.DIGEST_MIN_SCORE], DEFAULTS.DIGEST_MIN_SCORE),
     vocabNotionDatabaseId: p[SSM.VOCAB_NOTION_DATABASE_ID] ?? '',
     vocabReviewSize: num(p[SSM.VOCAB_REVIEW_SIZE], DEFAULTS.VOCAB_REVIEW_SIZE),
+    writingNotionDatabaseId: p[SSM.WRITING_NOTION_DATABASE_ID] ?? '',
+    writingQuizSize: num(p[SSM.WRITING_QUIZ_SIZE], DEFAULTS.WRITING_QUIZ_SIZE),
   };
   return cachedConfig;
 }

@@ -2,7 +2,8 @@ import { encodeCallback } from '../domain/feedback';
 import { AREA_LABEL } from '../domain/curriculum';
 import { encodeLessonCallback, type LessonPlan } from '../domain/learning';
 import { encodeVocabCallback, shortDate, KIND_LABEL } from '../domain/vocab';
-import type { Article, Category, LessonContent, SourceType, VocabEntry } from './types';
+import { answerOf } from '../domain/writing';
+import type { Article, Category, LessonContent, SourceType, VocabEntry, WritingEntry } from './types';
 
 const CATEGORY_LABEL: Record<Category, string> = {
   travel: '여행',
@@ -324,6 +325,34 @@ export function formatReviewItem(entry: VocabEntry, index: number, total: number
     vocabHeadline(entry),
     `정답 보기 → <tg-spoiler>${answer}</tg-spoiler>`,
   ].join('\n');
+}
+
+// ---------------------------------------------------------------- TOEFL Writing
+
+export function formatWritingHeader(count: number): string {
+  return `✍️ <b>오늘의 TOEFL Writing</b> — ${count}문장\n한국어를 보고 영어로 써 본 뒤, 정답을 눌러 비교해 보세요.`;
+}
+
+/**
+ * Writing 문제 1건 — 한국어만 보이고 영어는 스포일러. 교정본이 있으면 정답은 교정본이고,
+ * 사용자가 썼던 문장과 메모(왜 고쳤는지)도 스포일러 안에 같이 넣는다. 순수함수.
+ */
+export function formatWritingItem(entry: WritingEntry, index: number, total: number): string {
+  const source = entry.source ? `  <i>${escapeHtml(entry.source)}</i>` : '';
+  const answer = [escapeHtml(clip(answerOf(entry), 500))];
+  if (entry.corrected?.trim()) answer.push(`✏️ 내가 쓴 것: ${escapeHtml(clip(entry.text, 500))}`);
+  if (entry.note) answer.push(`💡 ${escapeHtml(clip(entry.note, 400))}`);
+  return [
+    `<b>${index + 1}/${total}</b>${source}`,
+    escapeHtml(clip(entry.korean ?? '', 600)),
+    `정답 → <tg-spoiler>${answer.join('\n')}</tg-spoiler>`,
+  ].join('\n');
+}
+
+/** 헤더 + 문제들을 한 메시지로 (넘치면 여러 메시지). 순수함수. */
+export function formatWritingQuiz(entries: WritingEntry[]): string[] {
+  const sections = [formatWritingHeader(entries.length), ...entries.map((e, i) => formatWritingItem(e, i, entries.length))];
+  return packSections(sections, TELEGRAM_MAX);
 }
 
 /** 사용자 메시지에 답장으로 보낸다 (어떤 입력에 대한 카드인지 보이게). */

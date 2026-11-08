@@ -2,7 +2,7 @@ import {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } from '@aws-sdk/client-bedrock-runtime';
-import type { Curation, LessonContent, SourceType, VocabEnrichment, VocabEntry, VocabIntent, VocabIntentResult, VocabKind, VocabRevision } from './types';
+import type { Curation, LessonContent, SourceType, VocabEnrichment, VocabEntry, VocabIntent, VocabIntentResult, VocabKind, VocabRevision, WritingEnrichment } from './types';
 import { splitKoreanInstruction } from '../domain/vocab';
 import { AREA_LABEL } from '../domain/curriculum';
 import type { LessonPlan } from '../domain/learning';
@@ -356,6 +356,47 @@ export async function classifyVocabMessage(
 ): Promise<VocabIntentResult> {
   const raw = await invokeClaude(modelId, region, VOCAB_INTENT_SYSTEM_PROMPT, buildVocabIntentPrompt(message, lastCard), 400);
   return parseVocabIntent(raw);
+}
+
+// ---------------------------------------------------------------- TOEFL Writing
+
+const WRITING_SYSTEM_PROMPT = `너는 사용자의 TOEFL Writing 튜터다. 사용자는 한국어 화자이고, TOEFL Writing 교재의 "한국어 문장을 영어로 쓰기" 연습을 하며
+자기가 쓴 영어 문장을 기록한다. 그 문장을 받아 ① 나중에 문제로 쓸 한국어 뜻과 ② 문법·철자를 고친 모범 문장을 만든다.
+
+작성 원칙:
+- korean: 문장의 의도를 자연스러운 한국어 한 문장으로. 사용자가 나중에 이 한국어만 보고 영어로 다시 써 보는 **문제**다 —
+  직역투가 아니라 한국어로 쓸 법한 문장으로, 영어 단어·힌트는 섞지 마라. 문장에 오류가 있으면 사용자가 의도한 뜻으로 옮긴다.
+  이메일·편지 문맥("I'm writing to …")은 그 격식을 살린다.
+- corrected: 문법·철자·어색한 어휘·빠진 조동사·수 일치를 고친 **전체 문장**. 사용자의 문장 구조와 단어 선택을 최대한 살리고,
+  틀리지 않은 부분을 더 멋진 표현으로 바꾸지 마라. 의문문엔 물음표, 평서문엔 마침표, 첫 글자 대문자는 갖춘다.
+  고칠 게 없으면(문장부호·대소문자만 다른 경우 포함) 빈 문자열.
+- note: 무엇을 왜 고쳤는지 한국어로 한두 줄 ("could't → couldn't 철자", "who presenting → who was presenting: 관계절에 동사 필요" 식).
+  고칠 게 없으면 이 문장에서 기억할 표현 1~2개를 "표현: 뜻"으로.
+- 반드시 아래 JSON만 출력하고 그 외 텍스트는 절대 출력하지 마라.
+{"korean": "<한국어 뜻>", "corrected": "<고친 전체 문장 또는 빈 문자열>", "note": "<메모>"}`;
+
+export function buildWritingPrompt(text: string, userKorean?: string): string {
+  return `문장: ${text}${userKorean ? `
+사용자가 적은 한국어 뜻(이 뜻을 기준으로 교정하라): ${userKorean}` : ''}
+
+JSON으로만 답하라.`;
+}
+
+/** Bedrock 응답 → WritingEnrichment. 한국어가 비면 throw. 순수함수. */
+export function parseWritingEnrichment(text: string): WritingEnrichment {
+  const p = parseJsonObject(text);
+  const result: WritingEnrichment = {
+    korean: str(p.korean),
+    corrected: str(p.corrected) || undefined,
+    note: str(p.note) || undefined,
+  };
+  if (!result.korean) throw new Error(`Writing 응답에 한국어 없음: ${text.slice(0, 200)}`);
+  return result;
+}
+
+export async function enrichWriting(modelId: string, region: string, text: string, userKorean?: string): Promise<WritingEnrichment> {
+  const raw = await invokeClaude(modelId, region, WRITING_SYSTEM_PROMPT, buildWritingPrompt(text, userKorean), 600);
+  return parseWritingEnrichment(raw);
 }
 
 export async function enrichVocab(

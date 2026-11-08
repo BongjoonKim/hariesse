@@ -89,15 +89,16 @@ export interface NotionPage {
   properties?: Record<string, Record<string, unknown>>;
 }
 
-type Prop = Record<string, unknown> | undefined;
+export type Prop = Record<string, unknown> | undefined;
 
-function plain(prop: Prop, type: 'title' | 'rich_text'): string {
+/** Notion 속성 값 읽기 — 단어장·Writing DB 파서가 같이 쓴다. */
+export function plain(prop: Prop, type: 'title' | 'rich_text'): string {
   const parts = (prop?.[type] as { plain_text?: string }[] | undefined) ?? [];
   return parts.map((p) => p.plain_text ?? '').join('').trim();
 }
-const selectName = (prop: Prop) => (prop?.select as { name?: string } | null | undefined)?.name;
-const dateStart = (prop: Prop) => (prop?.date as { start?: string } | null | undefined)?.start?.slice(0, 10);
-const numberValue = (prop: Prop) => (typeof prop?.number === 'number' ? prop.number : undefined);
+export const selectName = (prop: Prop) => (prop?.select as { name?: string } | null | undefined)?.name;
+export const dateStart = (prop: Prop) => (prop?.date as { start?: string } | null | undefined)?.start?.slice(0, 10);
+export const numberValue = (prop: Prop) => (typeof prop?.number === 'number' ? prop.number : undefined);
 
 /** Notion page → VocabEntry. 손으로 넣은 행이라 빈 칸·모르는 선택지를 모두 허용. 순수함수. */
 export function parseVocabPage(page: NotionPage): VocabEntry {
@@ -129,7 +130,7 @@ export function parseVocabPage(page: NotionPage): VocabEntry {
   };
 }
 
-async function notionFetch(token: string, path: string, method: string, body?: unknown): Promise<unknown> {
+export async function notionFetch(token: string, path: string, method: string, body?: unknown): Promise<unknown> {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: headers(token),
@@ -139,15 +140,16 @@ async function notionFetch(token: string, path: string, method: string, body?: u
   return res.json();
 }
 
-/** DB 조회 (페이지네이션). limit까지만 모은다. */
-async function queryVocab(
+/** DB 조회 (페이지네이션). limit까지만 모은다. 행 → 엔트리 변환은 parse로. */
+export async function queryDatabase<T>(
   token: string,
   databaseId: string,
   filter: unknown,
   sorts: unknown[],
-  limit: number
-): Promise<VocabEntry[]> {
-  const entries: VocabEntry[] = [];
+  limit: number,
+  parse: (page: NotionPage) => T
+): Promise<T[]> {
+  const entries: T[] = [];
   let cursor: string | undefined;
   do {
     const data = (await notionFetch(token, `/databases/${databaseId}/query`, 'POST', {
@@ -156,11 +158,14 @@ async function queryVocab(
       page_size: Math.min(100, limit - entries.length),
       ...(cursor ? { start_cursor: cursor } : {}),
     })) as { results?: NotionPage[]; has_more?: boolean; next_cursor?: string | null };
-    entries.push(...(data.results ?? []).map(parseVocabPage));
+    entries.push(...(data.results ?? []).map(parse));
     cursor = data.has_more ? data.next_cursor ?? undefined : undefined;
   } while (cursor && entries.length < limit);
   return entries;
 }
+
+const queryVocab = (token: string, databaseId: string, filter: unknown, sorts: unknown[], limit: number) =>
+  queryDatabase(token, databaseId, filter, sorts, limit, parseVocabPage);
 
 export async function findVocabByKey(
   token: string,

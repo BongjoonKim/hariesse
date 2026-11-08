@@ -2,6 +2,27 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
+> ✍️ **2026-11-08 TOEFL Writing 문장 연습 증분 — develop PR, Prod 미반영** (브랜치 `claude/toefl-writing-sentences-13f331`).
+> 목적: 사용자가 TOEFL Writing 교재("한국어 → 영어로 쓰기" 연습)를 풀며 쓴 영어 문장을 모아 두고, 매일 낮에 5문장씩
+> **한국어만 보여 주고 영어로 써 보게** 하는 문제를 Telegram으로 보낸다. 영어 정답은 스포일러로 가린다. 버튼·채점은 없다(사용자 요청: 가리기만).
+> - **원본 저장소 = Notion DB "TOEFL Writing"** (`205a87eb3c20434b896d33213d051501`, 데이터소스 `c27b9040-…`), 부모 = 봉준 개발목록(`38de549e…`, TOEFL Vocab과 같은 위치).
+>   사용자의 원래 메모 페이지 "Haries Story / Toefl / Writing"(`40be549ed102801c9151c3633388d771`)의 문장 70개(Power Test 2 p70 ×10, Check-up p82·p92·p102 ×20)를 행으로 옮겼다.
+>   **hariesse Notion 연동은 봉준 개발목록 아래만 접근된다** — 사용자의 Toefl 페이지(`40be549ed102806f9a4ed680d0ff9ad4`)는 404(연결 안 됨). 그래서 DB를 거기 두지 않았다.
+>   사용자가 Toefl 페이지 ⋯ → 연결에 hariesse를 추가하면 두 DB(Vocab·Writing)를 거기로 옮겨도 된다(DB id는 안 바뀌므로 코드 변경 없음).
+> - 속성: `문장`(title, 사용자가 쓴 그대로) / `한국어`(문제) / `교정`(문법·철자 고친 모범 문장, 없으면 빈칸) / `메모`(왜 고쳤나·핵심 표현) / `출처` / `번호` / `상태`(새로 추가·출제 중·제외) / `출제 횟수` / `마지막 출제` / `키`.
+>   사용자는 `문장`만 적으면 된다. `한국어`·`교정`·`메모`는 빈 칸만 채운다(직접 쓴 건 안 덮음). `제외`로 바꾸면 출제에서 빠진다.
+> - `WritingFn`(`src/handlers/writing`) + EventBridge **매일 12:00 KST (03:00 UTC)**. ① `한국어`가 빈 행을 Bedrock으로 채움(1회 최대 `WRITING_ENRICH_CAP`=30)
+>   ② `pickQuizEntries`: 출제 횟수 적은 순 → 마지막 출제 오래된 순(안 나온 것 먼저) → 추가 순으로 `writing-quiz-size`(SSM, 기본 5)개 → 메시지 1개(넘치면 분할)
+>   ③ 보낸 행의 `출제 횟수 +1`·`마지막 출제`·`상태=출제 중`. 같은 KST 날짜엔 1번(Profile `pk='WRITING'`). `/writing` = 지금 바로(정기 기록 안 건드림), `{"enrichOnly":true}` = 채우기만(운영용).
+> - 교정 판별 `detectWritingCorrection`: 대소문자·앞뒤 문장부호만 다르면 교정 아님(정답 = 쓴 그대로). 정답 스포일러 = 교정본 + `✏️ 내가 쓴 것: …` + `💡 메모`.
+> - 공유 리팩터: `notion-vocab.ts`의 `notionFetch`/`queryDatabase`/속성 파서 export, `dynamo.ts`의 상태 머지 `mergeStateItem`(VOCAB·WRITING 공용).
+>   Feedback Lambda 환경변수 `WRITING_FUNCTION_NAME`(없으면 `/writing` 무시). `-c vocab=false`면 WritingFn도 안 만든다(TOEFL = 내 배포 전용).
+> - 실행 기록(2026-11-08, Mac, 로컬 핸들러 직접 호출 — 배포 아님): SSM `/hariesse/writing-notion-database-id` 등록.
+>   `enrichOnly` 3회로 70행 전부 채움(30행 1분 50초). 교정 예: "could't → couldn't", "who presenting → who was presenting", "I'm appreciate → I appreciate".
+>   `{"force":true}` 1회로 Telegram 문제 5건 발송 확인 (아래 "검증" 참고).
+> - 검증: `tsc`, 단위테스트 184개(신규 21), `cdk synth` 성공(스케줄 cron 4개: 22·11·12·03 UTC).
+> - **남은 일**: develop PR 머지 → Prod 머지(자동 배포) → 다음 날 12:00 KST 정기 발송 확인. 배포 전엔 Lambda가 없으니 정기 발송은 안 온다.
+
 > ✅ **2026-07-20 배포 완료 + E2E 성공.** §4의 배포 절차는 전부 실행됐다.
 > 실제 파이프라인 1회 실행으로 Telegram 다이제스트 전송 + Notion 8건 아카이브 확인.
 > 배포 중 수정한 것 (아래 §8 함정 메모에도 반영):
