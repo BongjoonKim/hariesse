@@ -20,7 +20,7 @@
 > - 실행 기록(2026-11-08, Mac, 로컬 핸들러 직접 호출 — 배포 아님): SSM `/hariesse/writing-notion-database-id` 등록.
 >   `enrichOnly`로 채움(30행 1분 50초). 교정 예: "could't → couldn't", "finialized → finalized", "I'm appreciate → I appreciate", "errors has → errors have".
 >   ⚠️ 처음 구현은 채운 뒤 상태를 '새로 추가'로 둬서 **매 실행마다 같은 30행을 다시 채웠다**(Bedrock 90회 낭비, 값은 빈 칸만 채우므로 안 바뀜) → 채우면 '출제 중'으로 바꾸게 고침.
->   고친 뒤 `enrichOnly` 2회로 나머지 40행 채움. `{"force":true}` 1회로 Telegram 문제 5건(p70 #1~5) 발송, Notion `출제 횟수=1`·`마지막 출제=2026-11-08`·`상태=출제 중` 갱신 확인.
+>   고친 뒤 `enrichOnly` 3회(30+30+5)로 70행 전부 채움(API로 `한국어` 비어 있지 않은 행 70개 확인; 교정이 붙은 행 24개). `{"force":true}` 1회로 Telegram 문제 5건(p70 #1~5) 발송, Notion `출제 횟수=1`·`마지막 출제=2026-11-08`·`상태=출제 중` 갱신 확인.
 >   내일 12:00 정기 발송은 **Prod 배포 전엔 안 온다**(Lambda가 아직 없음).
 > - 검증: `tsc`, 단위테스트 184개(신규 21), `cdk synth` 성공(스케줄 cron 4개: 22·11·12·03 UTC).
 > - **남은 일**: develop PR 머지 → Prod 머지(자동 배포) → 다음 날 12:00 KST 정기 발송 확인. 배포 전엔 Lambda가 없으니 정기 발송은 안 온다.
