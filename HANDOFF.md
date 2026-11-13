@@ -2,7 +2,7 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
-> ✍️ **2026-11-13 Writing 교정을 `문장`에 덮어쓰기 — develop PR, Prod 미반영** (브랜치 `claude/toefl-writing-typo-fix-75be20`).
+> ✍️ **2026-11-13 Writing 교정을 `문장`에 덮어쓰기 — 2026-11-13 배포 완료** (PR #21 → develop af91ddd, Prod PR #22 → 84390d8, Deploy 워크플로 08:04Z 성공, `WritingFn` LastModified 08:04:31Z 확인).
 > 사용자 요청: "문장과 교정을 구분하지 말아줘. 오타는 타이핑 실수니 고쳐서 저장해 달라." → `교정` 칸 폐지.
 > - `WritingEntry.corrected` 삭제, `WRITING_PROP`에서 `교정` 제거(코드가 읽지도 쓰지도 않음). Bedrock `corrected`가 쓴 것과 다르면(대소문자·문장부호만 달라도)
 >   `문장`·`키`를 고친 문장으로 PATCH — `applyWritingEnrichment`(순수함수). 고칠 게 없으면 `문장`은 안 건드린다. `메모`엔 무엇을 고쳤는지만(원문은 안 남김 — 단어장과 같은 원칙).
@@ -12,7 +12,7 @@
 >   `NOTION_TOKEN=$(aws secretsmanager get-secret-value --secret-id hariesse/notion-token --region ap-northeast-2 --query SecretString --output text) WRITING_DB=205a87eb3c20434b896d33213d051501 npx ts-node scripts/migrate-writing-corrections.ts --apply`
 >   (`--apply` 없으면 dry-run). Notion의 `교정` 속성은 이제 전부 비어 있으니 지워도 된다(코드는 무관).
 > - 검증: `tsc`, 단위테스트 186개(Writing 테스트 갱신), `cdk synth` 성공.
-> - **남은 일**: develop PR #21 머지 → Prod 머지(자동 배포) → 다음 12:00 KST 발송에서 스포일러에 "내가 쓴 것" 줄이 없는지 확인.
+> - **남은 일**: 다음 12:00 KST 발송(2026-11-14)에서 스포일러에 "내가 쓴 것" 줄이 없는지 확인.
 
 > ✍️ **2026-11-08 TOEFL Writing 문장 연습 증분 — 2026-11-08 배포 완료** (PR #18 → develop 2ccd544, Prod PR #19 → 32059b2, Deploy 워크플로 06:05Z 성공).
 > 배포 확인: `WritingFn` = `HariessePipeline-WritingFnFED0A684-NAwDDFff9EhI`(timeout 10분, 비동기 재시도 0), EventBridge `DailyWritingQuizSchedule` `cron(0 3 * * ? *)` ENABLED,
