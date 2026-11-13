@@ -2,7 +2,10 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
-> ✍️ **2026-11-08 TOEFL Writing 문장 연습 증분 — develop PR, Prod 미반영** (브랜치 `claude/toefl-writing-sentences-13f331`).
+> ✍️ **2026-11-08 TOEFL Writing 문장 연습 증분 — 2026-11-08 배포 완료** (PR #18 → develop 2ccd544, Prod PR #19 → 32059b2, Deploy 워크플로 06:05Z 성공).
+> 배포 확인: `WritingFn` = `HariessePipeline-WritingFnFED0A684-NAwDDFff9EhI`(timeout 10분, 비동기 재시도 0), EventBridge `DailyWritingQuizSchedule` `cron(0 3 * * ? *)` ENABLED,
+> FeedbackFn 환경변수 `WRITING_FUNCTION_NAME` 설정됨. 배포된 함수를 `{"enrichOnly":true}`로 호출 → `{"enriched":0}`(70행 모두 채워진 상태) 정상.
+> **첫 정기 발송은 2026-11-09 12:00 KST.** 오늘 로컬 강제 실행으로 이미 1회(p70 #1~5) 나갔으므로 내일은 p70 #6부터.
 > 목적: 사용자가 TOEFL Writing 교재("한국어 → 영어로 쓰기" 연습)를 풀며 쓴 영어 문장을 모아 두고, 매일 낮에 5문장씩
 > **한국어만 보여 주고 영어로 써 보게** 하는 문제를 Telegram으로 보낸다. 영어 정답은 스포일러로 가린다. 버튼·채점은 없다(사용자 요청: 가리기만).
 > - **원본 저장소 = Notion DB "TOEFL Writing"** (`205a87eb3c20434b896d33213d051501`, 데이터소스 `c27b9040-…`).
@@ -24,7 +27,7 @@
 >   고친 뒤 `enrichOnly` 3회(30+30+5)로 70행 전부 채움(API로 `한국어` 비어 있지 않은 행 70개 확인; 교정이 붙은 행 24개). `{"force":true}` 1회로 Telegram 문제 5건(p70 #1~5) 발송, Notion `출제 횟수=1`·`마지막 출제=2026-11-08`·`상태=출제 중` 갱신 확인.
 >   내일 12:00 정기 발송은 **Prod 배포 전엔 안 온다**(Lambda가 아직 없음).
 > - 검증: `tsc`, 단위테스트 184개(신규 21), `cdk synth` 성공(스케줄 cron 4개: 22·11·12·03 UTC).
-> - **남은 일**: develop PR 머지 → Prod 머지(자동 배포) → 다음 날 12:00 KST 정기 발송 확인. 배포 전엔 Lambda가 없으니 정기 발송은 안 온다.
+> - **남은 일**: 2026-11-09 12:00 KST 정기 발송이 오는지, 폰에서 `/writing`이 동작하는지 확인. 미머지 PR #12(10/17, 단어장 물음표·한국어 꼬리)는 의도 분류(#15)와 겹쳐 보류 — 닫을지 결정 필요.
 
 > ✅ **2026-07-20 배포 완료 + E2E 성공.** §4의 배포 절차는 전부 실행됐다.
 > 실제 파이프라인 1회 실행으로 Telegram 다이제스트 전송 + Notion 8건 아카이브 확인.
