@@ -7,12 +7,12 @@
 > - `WritingEntry.corrected` 삭제, `WRITING_PROP`에서 `교정` 제거(코드가 읽지도 쓰지도 않음). Bedrock `corrected`가 쓴 것과 다르면(대소문자·문장부호만 달라도)
 >   `문장`·`키`를 고친 문장으로 PATCH — `applyWritingEnrichment`(순수함수). 고칠 게 없으면 `문장`은 안 건드린다. `메모`엔 무엇을 고쳤는지만(원문은 안 남김 — 단어장과 같은 원칙).
 > - Telegram 정답 스포일러 = `문장` + `💡 메모`. `✏️ 내가 쓴 것:` 줄 삭제. 프롬프트: "고친 문장이 원문을 대체해 저장되니 완전한 문장으로", 빈 문자열은 완전히 같을 때만.
-> - **기존 행 마이그레이션(미실행)**: `교정`이 채워진 행 26건(dry-run으로 확인 — 전부 오타·문법 수정, 예 "finialized → finalized.", "I'm appreciate → I appreciate your").
->   세션에서 Notion에 쓰는 단계가 권한 분류기에 막혀 **적용 못 함**. 사용자가 직접:
+> - **기존 행 마이그레이션 — 2026-11-13 실행 완료(Mac 세션, 사용자 승인)**: `교정`이 채워진 행 26건(전부 오타·문법 수정, 예 "finialized → finalized.", "I'm appreciate → I appreciate your")의
+>   `문장`·`키`를 교정 문장으로 바꾸고 `교정`을 비움. 재실행 dry-run 0건, 샘플 행 확인. 다시 돌릴 일은 없지만 명령은:
 >   `NOTION_TOKEN=$(aws secretsmanager get-secret-value --secret-id hariesse/notion-token --region ap-northeast-2 --query SecretString --output text) WRITING_DB=205a87eb3c20434b896d33213d051501 npx ts-node scripts/migrate-writing-corrections.ts --apply`
->   (`--apply` 없으면 dry-run). 끝나면 Notion의 `교정` 속성은 비어 있으니 지워도 된다(코드는 무관). 안 옮겨도 새 코드는 동작하지만 그 26행은 오타 문장이 정답으로 나간다.
+>   (`--apply` 없으면 dry-run). Notion의 `교정` 속성은 이제 전부 비어 있으니 지워도 된다(코드는 무관).
 > - 검증: `tsc`, 단위테스트 186개(Writing 테스트 갱신), `cdk synth` 성공.
-> - **남은 일**: develop PR 머지 → Prod 머지(자동 배포) → 위 마이그레이션 실행 → 다음 12:00 KST 발송에서 스포일러에 "내가 쓴 것" 줄이 없는지 확인.
+> - **남은 일**: develop PR #21 머지 → Prod 머지(자동 배포) → 다음 12:00 KST 발송에서 스포일러에 "내가 쓴 것" 줄이 없는지 확인.
 
 > ✍️ **2026-11-08 TOEFL Writing 문장 연습 증분 — 2026-11-08 배포 완료** (PR #18 → develop 2ccd544, Prod PR #19 → 32059b2, Deploy 워크플로 06:05Z 성공).
 > 배포 확인: `WritingFn` = `HariessePipeline-WritingFnFED0A684-NAwDDFff9EhI`(timeout 10분, 비동기 재시도 0), EventBridge `DailyWritingQuizSchedule` `cron(0 3 * * ? *)` ENABLED,
