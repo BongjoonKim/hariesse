@@ -133,7 +133,7 @@ export type WritingStatus = 'new' | 'active' | 'excluded';
 /** Bedrock이 채우는 Writing 문장 정보. korean = 문제로 나갈 한국어 뜻. */
 export interface WritingEnrichment {
   korean: string;
-  /** 문법·철자를 고친 모범 문장. 고칠 게 없으면 비어 있다. */
+  /** 문법·철자를 고친 전체 문장. `문장` 칸을 이걸로 덮어쓴다. 고칠 게 없으면 비어 있다. */
   corrected?: string;
   /** 무엇을 왜 고쳤는지 / 기억할 표현 */
   note?: string;
@@ -143,13 +143,11 @@ export interface WritingEnrichment {
 export interface WritingEntry {
   /** Notion page id (하이픈 없는 32자) */
   pageId: string;
-  /** 사용자가 쓴 문장 그대로 */
+  /** 영어 문장 = 정답. 사용자가 쓴 것을 Bedrock이 문법·철자를 고쳐 덮어쓴 상태 (오류는 타이핑 실수라 원문을 따로 두지 않는다) */
   text: string;
   key?: string;
   /** 문제(한국어 → 영어로 써 보기) */
   korean?: string;
-  /** 고친 모범 문장. 없으면 text가 곧 정답 */
-  corrected?: string;
   note?: string;
   /** 교재 출처 (예: "Check-up (p82)") */
   source?: string;

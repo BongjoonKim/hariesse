@@ -4,7 +4,8 @@ import type { WritingEnrichment, WritingEntry, WritingStatus } from '../lib/type
 /**
  * TOEFL Writing 문장 연습 도메인 로직 (순수함수, 테스트 대상).
  * - 사용자가 교재의 "한국어 → 영어로 쓰기" 연습을 하며 쓴 영어 문장을 Notion "TOEFL Writing" DB에 적는다.
- * - Bedrock이 ① 문제로 쓸 한국어 뜻 ② 문법·철자를 고친 모범 문장을 채운다 (사용자가 직접 쓴 칸은 안 덮는다).
+ * - Bedrock이 ① 문제로 쓸 한국어 뜻 ② 문법·철자를 고친 문장을 만든다. 고친 문장은 `문장` 칸에 **덮어쓴다** —
+ *   문장의 오류는 타이핑 실수라서 쓴 것과 고친 것을 따로 두지 않는다(사용자 결정 2026-11-13). 무엇을 고쳤는지는 `메모`에만 남는다.
  * - 매일 낮에 N문장씩 출제: 한국어만 보여 주고 영어 정답은 스포일러. 버튼·채점은 없다 — 혼자 써 보는 연습이라 그렇다.
  * - 출제 순서는 덜 나온 문장부터(출제 횟수 → 마지막 출제 → 추가 순). 전부 한 바퀴 돌면 처음부터 다시.
  * - 원본 저장소는 Notion DB. 여기는 Notion 형식을 모른다 (매핑은 lib/notion-writing.ts).
@@ -31,32 +32,47 @@ export function needsWritingEnrichment(entry: Pick<WritingEntry, 'text' | 'statu
 }
 
 /**
- * 고친 문장이 사용자 문장과 실제로 다른지. 대소문자·앞뒤 문장부호만 다른 건(정규화 키가 같은 건) 교정으로 치지 않는다 —
- * "which types … prioritize" → "Which types … prioritize?" 정도는 정답에 굳이 따로 보여줄 게 없다. 순수함수.
+ * 고친 문장이 사용자 문장과 실제로 다른지 — 다르면 그 문장을 돌려준다(이걸로 `문장`을 덮어쓴다).
+ * 대소문자·문장부호만 다른 것도 고친 것으로 친다: 어차피 한 칸에 저장하니 제대로 된 문장으로 두는 게 낫다. 순수함수.
  */
 export function detectWritingCorrection(text: string, corrected: string | undefined): string | undefined {
   const c = corrected?.trim();
-  if (!c) return undefined;
-  return normalizeWritingKey(c) === normalizeWritingKey(text) ? undefined : c;
+  if (!c || c === text.trim()) return undefined;
+  return c;
 }
 
-export type WritingEnrichedFields = Pick<WritingEntry, 'korean' | 'corrected' | 'note'>;
+export type WritingEnrichedFields = Pick<WritingEntry, 'korean' | 'note'>;
 
 /**
- * Bedrock 결과로 빈 칸만 채운다. 사용자가 Notion에 직접 쓴 한국어·교정·메모는 절대 덮어쓰지 않는다. 순수함수.
+ * Bedrock 결과로 빈 칸만 채운다. 사용자가 Notion에 직접 쓴 한국어·메모는 절대 덮어쓰지 않는다. 순수함수.
  */
-export function fillWritingFromEnrichment(current: WritingEnrichedFields, e: WritingEnrichment): WritingEnrichedFields {
+export function fillWritingFromEnrichment(current: WritingEnrichedFields, e: Pick<WritingEnrichment, 'korean' | 'note'>): WritingEnrichedFields {
   const pick = (mine: string | undefined, theirs: string | undefined) => mine?.trim() || theirs;
   return {
     korean: pick(current.korean, e.korean),
-    corrected: pick(current.corrected, e.corrected),
     note: pick(current.note, e.note),
   };
 }
 
-/** 정답으로 보여줄 문장: 교정본이 있으면 그것, 없으면 사용자가 쓴 그대로. */
-export function answerOf(entry: Pick<WritingEntry, 'text' | 'corrected'>): string {
-  return entry.corrected?.trim() || entry.text;
+export type WritingEnrichmentUpdate = WritingEnrichedFields & Pick<WritingEntry, 'key' | 'status' | 'quizCount'> & { text?: string };
+
+/**
+ * 채운 결과로 Notion에 쓸 필드. 고친 문장이 있으면 `문장`과 `키`를 그걸로 바꾼다(없으면 `문장`은 건드리지 않는다).
+ * 상태는 '출제 중'으로 — '새로 추가'로 두면 다음 실행 때 또 채우기 대상이 된다. 순수함수.
+ */
+export function applyWritingEnrichment(
+  entry: Pick<WritingEntry, 'text' | 'key' | 'korean' | 'note' | 'quizCount'>,
+  e: WritingEnrichment
+): WritingEnrichmentUpdate {
+  const corrected = detectWritingCorrection(entry.text, e.corrected);
+  const finalText = corrected ?? entry.text;
+  return {
+    ...fillWritingFromEnrichment(entry, e),
+    ...(corrected ? { text: corrected } : {}),
+    key: corrected ? normalizeWritingKey(finalText) : entry.key ?? normalizeWritingKey(finalText),
+    status: 'active',
+    quizCount: entry.quizCount,
+  };
 }
 
 /**
