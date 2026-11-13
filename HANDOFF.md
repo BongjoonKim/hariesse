@@ -10,7 +10,7 @@
 > - **기존 행 마이그레이션 — 2026-11-13 실행 완료(Mac 세션, 사용자 승인)**: `교정`이 채워진 행 26건(전부 오타·문법 수정, 예 "finialized → finalized.", "I'm appreciate → I appreciate your")의
 >   `문장`·`키`를 교정 문장으로 바꾸고 `교정`을 비움. 재실행 dry-run 0건, 샘플 행 확인. 다시 돌릴 일은 없지만 명령은:
 >   `NOTION_TOKEN=$(aws secretsmanager get-secret-value --secret-id hariesse/notion-token --region ap-northeast-2 --query SecretString --output text) WRITING_DB=205a87eb3c20434b896d33213d051501 npx ts-node scripts/migrate-writing-corrections.ts --apply`
->   (`--apply` 없으면 dry-run). Notion의 `교정` 속성은 이제 전부 비어 있으니 지워도 된다(코드는 무관).
+>   (`--apply` 없으면 dry-run). **Notion DB의 `교정` 속성은 2026-11-13 삭제함**(API PATCH `properties.교정=null`, 삭제 전 채워진 행 0건 확인). 코드는 무관.
 > - 검증: `tsc`, 단위테스트 186개(Writing 테스트 갱신), `cdk synth` 성공.
 > - **남은 일**: 다음 12:00 KST 발송(2026-11-14)에서 스포일러에 "내가 쓴 것" 줄이 없는지 확인.
 
