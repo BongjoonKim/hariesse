@@ -3,7 +3,7 @@ import {
   needsWritingEnrichment,
   detectWritingCorrection,
   fillWritingFromEnrichment,
-  answerOf,
+  applyWritingEnrichment,
   pickQuizEntries,
   applyQuizSent,
   WRITING_STATUS_LABEL,
@@ -34,11 +34,15 @@ describe('채우기 대상', () => {
 });
 
 describe('교정 판별', () => {
-  test('대소문자·앞뒤 문장부호만 다르면 교정이 아니다', () => {
-    expect(detectWritingCorrection('which types of benefits do you prioritize', 'Which types of benefits do you prioritize?')).toBeUndefined();
-    expect(detectWritingCorrection('On which day is the makeup class scheduled', 'On which day is the makeup class scheduled?')).toBeUndefined();
+  test('똑같거나 비어 있으면 교정이 아니다 (앞뒤 공백은 무시)', () => {
+    expect(detectWritingCorrection('Which types of benefits do you prioritize?', ' Which types of benefits do you prioritize? ')).toBeUndefined();
     expect(detectWritingCorrection('x', '')).toBeUndefined();
     expect(detectWritingCorrection('x', undefined)).toBeUndefined();
+  });
+  test('대소문자·문장부호만 달라도 고친 문장으로 저장한다 (한 칸에 두니 제대로 된 문장으로)', () => {
+    expect(detectWritingCorrection('which types of benefits do you prioritize', 'Which types of benefits do you prioritize?')).toBe(
+      'Which types of benefits do you prioritize?'
+    );
   });
   test('단어가 바뀌면 교정', () => {
     expect(detectWritingCorrection('The trainer was sick and could’t come', 'The trainer was sick and couldn’t come.')).toBe(
@@ -55,15 +59,31 @@ describe('교정 판별', () => {
 
 describe('fillWritingFromEnrichment', () => {
   test('빈 칸만 채우고 사용자가 쓴 한국어·메모는 안 덮는다', () => {
-    const filled = fillWritingFromEnrichment(
-      { korean: '내가 쓴 뜻', corrected: undefined, note: '  ' },
-      { korean: '모델 뜻', corrected: 'Fixed.', note: '모델 메모' }
-    );
-    expect(filled).toEqual({ korean: '내가 쓴 뜻', corrected: 'Fixed.', note: '모델 메모' });
+    const filled = fillWritingFromEnrichment({ korean: '내가 쓴 뜻', note: '  ' }, { korean: '모델 뜻', note: '모델 메모' });
+    expect(filled).toEqual({ korean: '내가 쓴 뜻', note: '모델 메모' });
   });
-  test('정답은 교정본이 있으면 교정본', () => {
-    expect(answerOf({ text: 'a', corrected: undefined })).toBe('a');
-    expect(answerOf({ text: 'a', corrected: ' b ' })).toBe('b');
+});
+
+describe('applyWritingEnrichment', () => {
+  test('고친 문장이 있으면 문장·키를 그걸로 바꾸고 상태는 출제 중', () => {
+    const u = applyWritingEnrichment(
+      { text: 'The trainer was sick and could’t come', key: 'the trainer was sick and could’t come', korean: undefined, note: undefined, quizCount: 0 },
+      { korean: '트레이너가 아파서 올 수 없었다.', corrected: 'The trainer was sick and couldn’t come.', note: 'could’t → couldn’t 철자' }
+    );
+    expect(u).toEqual({
+      text: 'The trainer was sick and couldn’t come.',
+      key: "the trainer was sick and couldn't come", // 키는 따옴표를 곧은 것으로 정규화
+      korean: '트레이너가 아파서 올 수 없었다.',
+      note: 'could’t → couldn’t 철자',
+      status: 'active',
+      quizCount: 0,
+    });
+  });
+  test('고칠 게 없으면 문장 키를 안 넣는다 (Notion 제목을 다시 쓰지 않게). 키는 있던 것 유지', () => {
+    const u = applyWritingEnrichment({ text: 'Fine.', key: 'my-key', korean: '뜻', note: undefined, quizCount: 2 }, { korean: '모델 뜻', corrected: '', note: '표현: 뜻' });
+    expect(u).toEqual({ key: 'my-key', korean: '뜻', note: '표현: 뜻', status: 'active', quizCount: 2 });
+    expect('text' in u).toBe(false);
+    expect(applyWritingEnrichment({ text: 'Fine.', quizCount: 0 }, { korean: '뜻' }).key).toBe('fine');
   });
 });
 
@@ -96,8 +116,8 @@ describe('Notion 매핑', () => {
     expect(props[WRITING_PROP.lastQuizzed]).toEqual({ date: { start: TODAY } });
   });
   test('값이 undefined인 키는 칸을 비운다', () => {
-    const props = buildWritingProperties({ corrected: undefined, lastQuizzed: undefined });
-    expect(props[WRITING_PROP.corrected]).toEqual({ rich_text: [] });
+    const props = buildWritingProperties({ note: undefined, lastQuizzed: undefined });
+    expect(props[WRITING_PROP.note]).toEqual({ rich_text: [] });
     expect(props[WRITING_PROP.lastQuizzed]).toEqual({ date: null });
   });
   test('page → entry 왕복', () => {
@@ -106,10 +126,9 @@ describe('Notion 매핑', () => {
       created_time: '2026-11-07T23:30:00.000Z',
       properties: {
         ...buildWritingProperties({
-          text: 'She told us it should be finialized',
-          key: 'she told us it should be finialized',
+          text: 'She told us it should be finalized.',
+          key: 'she told us it should be finalized',
           korean: '그녀는 그것이 마무리되어야 한다고 말했다',
-          corrected: 'She told us it should be finalized.',
           note: 'finialized → finalized 철자',
           source: 'Power Test 2 (p70)',
           order: 8,
@@ -124,8 +143,8 @@ describe('Notion 매핑', () => {
     );
     const e = parseWritingPage(asNotion);
     expect(e.pageId).toBe(PAGE_ID);
-    expect(e.text).toBe('She told us it should be finialized');
-    expect(e.corrected).toBe('She told us it should be finalized.');
+    expect(e.text).toBe('She told us it should be finalized.');
+    expect(e.note).toBe('finialized → finalized 철자');
     expect(e.source).toBe('Power Test 2 (p70)');
     expect(e.order).toBe(8);
     expect(e.status).toBe('new');
@@ -133,19 +152,22 @@ describe('Notion 매핑', () => {
     expect(e.lastQuizzed).toBeUndefined();
     expect(e.createdDate).toBe('2026-11-08'); // KST
   });
-  test('손으로 넣은 빈 행', () => {
-    const e = parseWritingPage({ id: PAGE_ID, properties: { [WRITING_PROP.text]: { title: [{ plain_text: 'Hi there' }] } } });
+  test('손으로 넣은 빈 행. 옛 교정 칸이 남아 있어도 무시', () => {
+    const e = parseWritingPage({
+      id: PAGE_ID,
+      properties: { [WRITING_PROP.text]: { title: [{ plain_text: 'Hi there' }] }, 교정: { rich_text: [{ plain_text: 'Hi there.' }] } },
+    });
+    expect(e).not.toHaveProperty('corrected');
     expect(e).toMatchObject({ text: 'Hi there', quizCount: 0, status: undefined, korean: undefined });
   });
 });
 
 describe('Telegram 포맷', () => {
-  test('한국어만 보이고 영어는 스포일러. 교정본이 있으면 정답은 교정본 + 내가 쓴 것 + 메모', () => {
+  test('한국어만 보이고 영어는 스포일러. 정답 = 문장 + 메모', () => {
     const msg = formatWritingItem(
       entry({
-        text: 'He wondered who presenting at the seminar',
+        text: 'He wondered who was presenting at the seminar.',
         korean: '그는 세미나에서 누가 발표하는지 궁금해했다.',
-        corrected: 'He wondered who was presenting at the seminar.',
         note: 'who presenting → who was presenting',
         source: 'Power Test 2 (p70)',
       }),
@@ -157,16 +179,15 @@ describe('Telegram 포맷', () => {
     expect(msg).toContain('그는 세미나에서 누가 발표하는지 궁금해했다.');
     const spoiler = msg.slice(msg.indexOf('<tg-spoiler>'), msg.indexOf('</tg-spoiler>'));
     expect(spoiler).toContain('He wondered who was presenting at the seminar.');
-    expect(spoiler).toContain('✏️ 내가 쓴 것: He wondered who presenting at the seminar');
+    expect(spoiler).not.toContain('내가 쓴 것');
     expect(spoiler).toContain('💡 who presenting');
     // 영어는 스포일러 밖에 없어야 문제가 된다
     expect(msg.slice(0, msg.indexOf('<tg-spoiler>'))).not.toContain('wondered');
   });
-  test('교정본이 없으면 쓴 문장이 정답이고 "내가 쓴 것" 줄이 없다', () => {
+  test('메모가 없으면 스포일러엔 문장만', () => {
     const msg = formatWritingItem(entry({ korean: '긴 통근에 쓸 믿을 만한 게 필요했다.' }), 2, 5);
     expect(msg).toContain('<b>3/5</b>');
     expect(msg).toContain('<tg-spoiler>I needed something reliable for my long daily commute</tg-spoiler>');
-    expect(msg).not.toContain('내가 쓴 것');
   });
   test('헤더 + 5문장이 메시지 1개에 들어간다. HTML은 이스케이프', () => {
     const msgs = formatWritingQuiz(

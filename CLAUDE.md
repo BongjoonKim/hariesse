@@ -13,6 +13,7 @@
 > **2026-10-18 단어장 철자 자동 교정: 확실한 오타는 고친 철자로 저장한다(새 저장·수정·이어 붙이기 모두). 원문은 남기지 않고 Telegram 카드에만 `✏️ 철자 교정: a → b` 한 줄 — develop 머지(#15), Prod 배포됨(#16).**
 > **2026-10-18 단어장 의도 분류: 한글이 섞인 메시지는 새 표현/수정/이어 붙이기(append)로 Bedrock이 분류하고, "아까 문장에 추가로 …"는 마지막 카드에 이어 붙인다 — develop 머지(#15, 철자 교정 #13 포함), Prod 배포됨(#16).**
 > **2026-11-08 TOEFL Writing 문장 연습: Notion "TOEFL Writing"에 영어 문장을 적으면 매일 12:00 KST에 5문장씩 한국어 문제(영어 정답은 스포일러) — 2026-11-08 배포 완료 (HANDOFF 맨 위 블록).**
+> **2026-11-13 Writing 교정을 `문장`에 덮어쓰기: `교정` 칸 폐지. 오타는 타이핑 실수이므로 Bedrock이 고친 문장을 `문장`에 저장(원문 안 남김, `메모`에 무엇을 고쳤는지만) — develop PR, Prod 미반영. 기존 26행은 `scripts/migrate-writing-corrections.ts --apply`로 옮겨야 함 (HANDOFF 맨 위 블록).**
 > **⚠️ 작업이 끝나면 반드시 push + develop PR까지. 미머지 PR이 있으면 먼저 확인(2026-10-18, PR #13이 머지 안 된 채 #14가 배포된 사례).**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자 — 10/10 배포, 10/16 develop에 합침.**
@@ -60,9 +61,9 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
   Bedrock이 빈 칸(뜻/번역·품사·예문·동의어·TOEFL 팁)을 채운다. 매일 21:00 KST에 복습 퀴즈(뜻은 스포일러)
   `[✅ 알아요][❌ 몰라요]` → Leitner 박스(1·3·7·14·30일). **원본 저장소는 Notion DB** (DynamoDB에 따로 두지 않음).
   뜻이 틀리면 카드에 **답장**하거나 답장 없이 한국어로 고쳐 달라고 하면(24시간 안 마지막 저장 표현) Bedrock이 카드를 다시 쓴다.
-- **TOEFL Writing 문장 연습**: Notion "TOEFL Writing" DB에 `문장`(교재 연습하며 쓴 영어)만 적으면 Bedrock이 `한국어`(문제)·`교정`(문법·철자 고친 모범 문장)·`메모`를
+- **TOEFL Writing 문장 연습**: Notion "TOEFL Writing" DB에 `문장`(교재 연습하며 쓴 영어)만 적으면 Bedrock이 `한국어`(문제)·`메모`를
   채우고, 매일 12:00 KST에 덜 나온 문장부터 5개를 한 메시지로 보낸다 — 한국어만 보이고 영어는 `<tg-spoiler>`. 버튼·채점 없음. `/writing` = 지금 바로.
-  **원본 저장소는 Notion DB**. `상태=제외`면 출제 안 함. 사용자가 직접 쓴 한국어·교정은 덮지 않는다.
+  채우고, 문법·철자를 고친 문장을 `문장`에 **덮어쓴다**(오타 = 타이핑 실수, 원문은 안 남김). **원본 저장소는 Notion DB**. `상태=제외`면 출제 안 함. 사용자가 직접 쓴 한국어·메모는 덮지 않는다.
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 
@@ -105,7 +106,7 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - `src/domain/vocab.ts` — 단어장 입력 파싱/정규화 키/Leitner 복습/callback(순수함수, 테스트 대상).
 - `src/lib/notion-vocab.ts` — "TOEFL Vocab" DB 속성 매핑(`VOCAB_PROP`) + 조회/생성/갱신. 속성 이름 = 스키마.
   `notionFetch`/`queryDatabase`/속성 파서는 export — Writing DB도 같이 쓴다.
-- `src/domain/writing.ts` — Writing 문장 연습: 채우기 대상/교정 판별/출제 순서(순수함수, 테스트 대상).
+- `src/domain/writing.ts` — Writing 문장 연습: 채우기 대상/교정 반영(`applyWritingEnrichment`)/출제 순서(순수함수, 테스트 대상).
 - `src/lib/notion-writing.ts` — "TOEFL Writing" DB 속성 매핑(`WRITING_PROP`) + 조회/갱신.
 - `src/handlers/{collect,curate,deliver,feedback,learn,vocab,writing}/index.ts` — Lambda 핸들러.
 
@@ -136,8 +137,9 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
   Notion 메모에 원문·교정 기록을 쓰지 말 것(사용자 결정 2026-10-18). 카드 안내 한 줄만. 고유명사·구어체·고의적 표기는 교정하지 않도록 프롬프트에 명시되어 있다 — 풀지 말 것.
   dedup 키가 같은 차이(대소문자·문장부호)는 교정이 아니다. 고친 철자가 이미 있는 표현이면 새 행을 만들지 말고 그 카드의 헷갈린 횟수 +1.
 - **VocabFn 비동기 재시도 0회**: capture가 재실행되면 같은 표현이 '또 헷갈림'으로 집계된다. WritingFn도 0회(같은 문제가 두 번 온다).
-- **Writing 교정은 문장 자체를 바꾸지 않는다**: `문장`은 사용자가 쓴 그대로 두고 `교정` 칸에 모범 문장을 넣는다(단어장 철자 교정과 다름 — 쓴 것과 고친 것을 비교하는 게 연습이라서).
-  대소문자·앞뒤 문장부호만 다른 교정은 버린다(`detectWritingCorrection`). 출제 상태 기록은 `applyQuizSent` 필드만 PATCH — 사용자가 손댄 칸을 다시 쓰지 않게.
+- **Writing 교정은 `문장`에 덮어쓴다** (사용자 결정 2026-11-13, 그 전엔 `교정` 칸에 따로 뒀음): 문장의 오류는 타이핑 실수라 쓴 것과 고친 것을 비교하지 않는다.
+  Bedrock `corrected`가 쓴 것과 조금이라도 다르면(대소문자·문장부호 포함) `문장`·`키`를 그걸로 바꾼다(`applyWritingEnrichment`). 원문은 어디에도 남기지 않고 `메모`에 무엇을 고쳤는지만.
+  `교정` 속성은 코드에서 읽지도 쓰지도 않는다 — DB에 칸이 남아 있어도 무시. 출제 상태 기록은 `applyQuizSent` 필드만 PATCH — 사용자가 손댄 칸을 다시 쓰지 않게.
 - **SSM GetParameters는 1회 10개까지**: `getConfig()`가 10개씩 나눠 조회한다. SSM 이름을 늘려도 그대로 둘 것.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.
 
