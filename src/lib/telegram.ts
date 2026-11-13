@@ -2,7 +2,6 @@ import { encodeCallback } from '../domain/feedback';
 import { AREA_LABEL } from '../domain/curriculum';
 import { encodeLessonCallback, type LessonPlan } from '../domain/learning';
 import { encodeVocabCallback, shortDate, KIND_LABEL } from '../domain/vocab';
-import { answerOf } from '../domain/writing';
 import type { Article, Category, LessonContent, SourceType, VocabEntry, WritingEntry } from './types';
 
 const CATEGORY_LABEL: Record<Category, string> = {
@@ -335,12 +334,11 @@ export function formatWritingHeader(count: number): string {
 
 /**
  * Writing 문제 1건 — 한국어만 보이고 영어는 스포일러. 교정본이 있으면 정답은 교정본이고,
- * 사용자가 썼던 문장과 메모(왜 고쳤는지)도 스포일러 안에 같이 넣는다. 순수함수.
+ * 메모(무엇을 고쳤는지·기억할 표현)도 스포일러 안에 같이 넣는다. 순수함수.
  */
 export function formatWritingItem(entry: WritingEntry, index: number, total: number): string {
   const source = entry.source ? `  <i>${escapeHtml(entry.source)}</i>` : '';
-  const answer = [escapeHtml(clip(answerOf(entry), 500))];
-  if (entry.corrected?.trim()) answer.push(`✏️ 내가 쓴 것: ${escapeHtml(clip(entry.text, 500))}`);
+  const answer = [escapeHtml(clip(entry.text, 500))];
   if (entry.note) answer.push(`💡 ${escapeHtml(clip(entry.note, 400))}`);
   return [
     `<b>${index + 1}/${total}</b>${source}`,

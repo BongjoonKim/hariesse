@@ -1,24 +1,18 @@
 import { getConfig, getTelegramBotToken, getNotionToken, type AppConfig } from '../../lib/config';
 import { getWritingQuizState, updateWritingQuizState } from '../../lib/dynamo';
 import { enrichWriting } from '../../lib/bedrock';
-import { listWritingNeedingEnrichment, listWritingCandidates, updateWritingPage, type WritingFields } from '../../lib/notion-writing';
+import { listWritingNeedingEnrichment, listWritingCandidates, updateWritingPage } from '../../lib/notion-writing';
 import { sendMessage, formatWritingQuiz } from '../../lib/telegram';
 import { kstDate } from '../../domain/vocab';
-import {
-  normalizeWritingKey,
-  needsWritingEnrichment,
-  detectWritingCorrection,
-  fillWritingFromEnrichment,
-  pickQuizEntries,
-  applyQuizSent,
-} from '../../domain/writing';
+import { needsWritingEnrichment, applyWritingEnrichment, pickQuizEntries, applyQuizSent } from '../../domain/writing';
 import { DEFAULTS } from '../../lib/constants';
 import type { WritingEntry } from '../../lib/types';
 
 /**
  * TOEFL Writing 문장 연습 Lambda. 원본 저장소는 Notion "TOEFL Writing" DB — 사용자가 교재 연습을 하며 쓴 영어 문장을 '문장'에만 적는다.
  * 매일 낮 12:00 KST (EventBridge) 또는 /writing 명령:
- *   ① 한국어가 빈 행을 Bedrock으로 채운다 (한국어 뜻 = 문제, 교정 = 문법·철자를 고친 모범 문장, 메모 = 왜 고쳤나). 사용자가 직접 쓴 칸은 안 덮는다.
+ *   ① 한국어가 빈 행을 Bedrock으로 채운다 (한국어 뜻 = 문제, 메모 = 무엇을 고쳤나). 문법·철자를 고친 문장은 `문장`에 **덮어쓴다**
+ *      (오류는 타이핑 실수라 원문을 따로 두지 않는다 — 사용자 결정 2026-11-13). 사용자가 직접 쓴 한국어·메모는 안 덮는다.
  *   ② 덜 나온 문장부터 `writing-quiz-size`(기본 5)개를 한 메시지로 보낸다 — 한국어만 보이고 영어 정답은 스포일러. 버튼·채점은 없다.
  *   ③ 보낸 문장의 출제 횟수·마지막 출제를 갱신한다.
  * 정기 실행은 같은 KST 날짜에 1번만 (Profile 테이블 pk='WRITING'). `{"force":true}`는 언제든. `{"enrichOnly":true}`는 ①만 (운영용).
@@ -26,7 +20,7 @@ import type { WritingEntry } from '../../lib/types';
 
 export interface WritingEvent {
   force?: boolean;
-  /** 한국어·교정 채우기만 하고 출제는 안 한다 (처음 문장을 많이 넣었을 때 운영용) */
+  /** 한국어 채우기·문장 교정만 하고 출제는 안 한다 (처음 문장을 많이 넣었을 때 운영용) */
   enrichOnly?: boolean;
   // EventBridge 스케줄 이벤트 (source 있음) → 정기 출제
   source?: string;
@@ -95,8 +89,8 @@ async function markSent(notionToken: string, picked: WritingEntry[], today: stri
 }
 
 /**
- * Notion에 직접 넣은 행(상태 빈칸)과 채우기에 실패했던 행을 채운다. 사용자가 직접 쓴 한국어·교정·메모는 안 덮는다.
- * 교정이 사용자 문장과 대소문자·문장부호만 다르면 교정으로 치지 않는다 (정답 = 쓴 그대로).
+ * Notion에 직접 넣은 행(상태 빈칸)과 채우기에 실패했던 행을 채운다. 사용자가 직접 쓴 한국어·메모는 안 덮는다.
+ * Bedrock이 고친 문장이 쓴 것과 다르면 `문장`·`키`를 고친 문장으로 바꾼다 (applyWritingEnrichment).
  */
 async function enrichPending(cfg: AppConfig, notionToken: string): Promise<number> {
   let pending: WritingEntry[];
@@ -117,16 +111,11 @@ async function enrichPending(cfg: AppConfig, notionToken: string): Promise<numbe
       console.warn(`writing enrich 실패 "${entry.text}": ${(err as Error).message}`);
       continue;
     }
-    const filled = fillWritingFromEnrichment(entry, { ...e, corrected: detectWritingCorrection(entry.text, e.corrected) });
-    // 채우고 나면 '출제 중'으로 — '새로 추가'로 두면 다음 실행 때 또 채우기 대상이 되어 Bedrock을 반복 호출한다 (2026-11-08 실측 버그)
-    const fields: WritingFields = {
-      ...filled,
-      key: entry.key ?? normalizeWritingKey(entry.text),
-      status: 'active',
-      quizCount: entry.quizCount,
-    };
+    // 상태는 '출제 중'으로 — '새로 추가'로 두면 다음 실행 때 또 채우기 대상이 되어 Bedrock을 반복 호출한다 (2026-11-08 실측 버그)
+    const fields = applyWritingEnrichment(entry, e);
     try {
       await updateWritingPage(notionToken, entry.pageId, fields);
+      if (fields.text) console.log(`writing 교정: "${entry.text}" → "${fields.text}"`);
       done++;
     } catch (err) {
       console.warn(`채우기 저장 실패 "${entry.text}": ${(err as Error).message}`);

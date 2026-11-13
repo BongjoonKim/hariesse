@@ -7,12 +7,12 @@ import type { WritingEntry, WritingStatus } from './types';
  * "TOEFL Writing" Notion DB — Writing 문장 연습의 원본 저장소.
  * 속성 이름이 곧 스키마라 바꾸면 여기와 DB를 같이 바꿔야 한다.
  * 사용자가 Notion에서 직접 행을 추가하므로 '문장' 말고는 전부 비어 있을 수 있다고 가정한다.
+ * '교정' 칸은 2026-11-13에 없앴다 — 고친 문장은 '문장'에 덮어쓴다 (DB에 칸이 남아 있어도 읽지도 쓰지도 않는다).
  */
 export const WRITING_PROP = {
   text: '문장',
   key: '키',
   korean: '한국어',
-  corrected: '교정',
   note: '메모',
   source: '출처',
   order: '번호',
@@ -47,7 +47,6 @@ export function buildWritingProperties(f: WritingFields): Record<string, unknown
   if (has('text')) props[WRITING_PROP.text] = { title: [{ text: { content: (f.text ?? '').slice(0, 1900) } }] };
   text('key', WRITING_PROP.key);
   text('korean', WRITING_PROP.korean);
-  text('corrected', WRITING_PROP.corrected);
   text('note', WRITING_PROP.note);
   select('source', WRITING_PROP.source, f.source);
   number('order', WRITING_PROP.order);
@@ -67,7 +66,6 @@ export function parseWritingPage(page: NotionPage): WritingEntry {
     text: plain(p[WRITING_PROP.text], 'title'),
     key: text(WRITING_PROP.key),
     korean: text(WRITING_PROP.korean),
-    corrected: text(WRITING_PROP.corrected),
     note: text(WRITING_PROP.note),
     source: selectName(p[WRITING_PROP.source]),
     order: numberValue(p[WRITING_PROP.order]),
