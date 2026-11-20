@@ -41,13 +41,21 @@ export interface Article {
   textS3Key?: string;
   collectedAt: string;
   curatedAt?: string;
+  /** 처음 다이제스트에 실린 시각 */
   deliveredAt?: string;
+  /** 마지막으로 보낸 시각 (재전송 포함). 없으면 deliveredAt. */
+  lastSentAt?: string;
+  /** 보낸 횟수 (재전송 포함) */
+  sendCount?: number;
+  /** 읽음 표시 시각 — 버튼을 하나라도 누르면 찍힌다. 없고 전달됐으면 재전송 대상. */
+  readAt?: string;
   ttl?: number;
   // 피드백 idempotency 마커 — 액션당 1회만 반영 (`${action}FeedbackAt`)
   likeFeedbackAt?: string;
   siteFeedbackAt?: string;
   saveFeedbackAt?: string;
   skipFeedbackAt?: string;
+  readFeedbackAt?: string;
 }
 
 export interface Profile {

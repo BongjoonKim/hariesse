@@ -2,6 +2,26 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
+> 🔁 **2026-11-20 다이제스트: 읽음 표시 + 안 읽은 글 재전송 + 최신 글 우선 — develop PR, Prod 미반영.**
+> 발단: ⏭ 건너뛰기를 누르면 "이미 만료된 글이에요". 원인은 버튼이 아니라 **적체 + 수집 기준 TTL**.
+> - 진단(11/20): Articles `status=unread` 813건. curate·deliver가 `status-index`(정렬키 `collectedAt`)를 **오래된 순**으로 200/300건만 봐서,
+>   11/19에 큐레이션된 글이 10/26~27 수집분이었다(23일 지연). TTL은 수집 + 30일이라 전달 후 며칠~몇 시간 만에 삭제 → `getArticle` 없음 → 만료 토스트.
+>   최근 12일 전달 48건 중 테이블에 남은 건 7건, 11/20 아침 다이제스트 4건은 0건. 지워진 글이 피드에 남아 있으면 새 글로 재수집됨(11/7 좋아요 → 11/12 재수집 사례).
+> - 사용자 결정: ① 보냈더라도 **읽음 표시가 없으면 다시 보낸다** ② 읽음 = **아무 버튼이나**(새 `✅ 읽음` 버튼 포함) ③ **읽을 때까지 횟수 제한 없이**, 다이제스트 1회에 1건 ④ Reddit은 뺀다.
+> - 구현: `src/domain/digest.ts`(순수함수 — `isRead`/`pickResends`/`newSlotCount`/TTL). 버튼 `v1|read|<id>` → status `read`, 가중치·관심사 무변동.
+>   `markArticleFeedbackOnce`가 모든 액션에서 `readAt`을 찍는다. deliver: 마지막 전송(`lastSentAt`, 없으면 `deliveredAt`) 후 `RESEND_AFTER_DAYS`=3일 지난 안 읽은 글 중
+>   가장 오래 기다린 `RESEND_PER_DIGEST`=1건을 새 글 뒤에 `🔁 읽음 표시가 없어 다시 보내요`로 붙이고 새 글 자리를 1 줄인다(새 글 최소 1건).
+>   `markDelivered`가 TTL을 **전송 시점 + `DELIVERED_TTL_DAYS`=90일**로 다시 잡고 `lastSentAt`·`sendCount` 갱신(`deliveredAt`은 첫 전달 유지, 지워진 글은 되살리지 않음).
+>   재전송 차례를 기다리는 안 읽은 글은 TTL이 7일 안에 끝나면 deliver가 연장한다. curate·deliver 모두 **최근 수집순**(`listArticlesByStatus(..., newestFirst=true)`).
+>   deliver 로그에 글 ID를 남긴다(이번 진단 때 어떤 글이 나갔는지 알 수 없었음).
+> - 알아둘 점: 최신순으로 바꾸면서 **쌓여 있던 800여 건은 대부분 큐레이션 없이 만료된다**(의도). 배포 전에 전달된 안 읽은 글 7건(11/15~18 전달)은 배포 후 재전송 대상.
+>   `sendCount`는 이번 배포 이후 전송부터 센다.
+> - 운영(11/20, Mac 세션, 사용자 승인): **내 배포 Sources의 Reddit 9개 `status=muted`**(가중치·좋아요 기록 유지, 되돌리려면 `active`). 9개 모두 수집이 `…/top/.rss?t=day -> 404`로
+>   실패 중이었다(원인 미조사). 디자인 stage의 Reddit 2개(r/architecture, r/InteriorDesign)는 건드리지 않음 — 같은 404일 가능성 있음.
+> - 검증: `tsc`, 단위테스트 209개(digest 신규), `cdk synth` 성공. 실제 Telegram 발송·버튼은 배포 후 확인 필요.
+> - **남은 일**: Prod 배포 후 다음 07:00 다이제스트에서 ① 글이 최근 수집분인지 ② `✅ 읽음` 버튼 동작 ③ 3일 뒤 재전송이 오는지 확인.
+>   LinkedIn 연동은 "본 글 링크를 봇에 보내면 요약해 Notion 저장" 방향으로 결정(피드 자동 수집은 공식 API 없음) — 미구현.
+
 > ✍️ **2026-11-13 Writing 교정을 `문장`에 덮어쓰기 — 2026-11-13 배포 완료** (PR #21 → develop af91ddd, Prod PR #22 → 84390d8, Deploy 워크플로 08:04Z 성공, `WritingFn` LastModified 08:04:31Z 확인).
 > 사용자 요청: "문장과 교정을 구분하지 말아줘. 오타는 타이핑 실수니 고쳐서 저장해 달라." → `교정` 칸 폐지.
 > - `WritingEntry.corrected` 삭제, `WRITING_PROP`에서 `교정` 제거(코드가 읽지도 쓰지도 않음). Bedrock `corrected`가 쓴 것과 다르면(대소문자·문장부호만 달라도)
