@@ -5,10 +5,10 @@ import type { ArticleStatus } from '../lib/types';
  * Telegram callback_data 인코딩/디코딩 + 액션별 효과 정의.
  */
 
-export type FeedbackAction = 'like' | 'site' | 'save' | 'skip';
+export type FeedbackAction = 'like' | 'site' | 'save' | 'skip' | 'read';
 
 const PREFIX = 'v1';
-const ACTIONS: readonly FeedbackAction[] = ['like', 'site', 'save', 'skip'];
+const ACTIONS: readonly FeedbackAction[] = ['like', 'site', 'save', 'skip', 'read'];
 
 /** callback_data는 Telegram 제한 64바이트 이하여야 한다. articleId(32) + "v1|site|" = 40. */
 export function encodeCallback(action: FeedbackAction, articleId: string): string {
@@ -83,6 +83,16 @@ export function feedbackEffects(action: FeedbackAction): FeedbackEffects {
         articleStatus: 'skipped',
         bumpProfileInterests: false,
         ack: '⏭ 이런 글은 덜 보여줄게요',
+      };
+    case 'read':
+      // 평가 없이 읽음만 — 가중치·관심사는 건드리지 않는다. (어떤 버튼이든 누르면 읽음으로 친다: readAt)
+      return {
+        weightDelta: 0,
+        likeCountDelta: 0,
+        skipCountDelta: 0,
+        articleStatus: 'read',
+        bumpProfileInterests: false,
+        ack: '✅ 읽음으로 표시했어요',
       };
   }
 }

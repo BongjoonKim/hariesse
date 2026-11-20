@@ -44,6 +44,8 @@ export function buildItemKeyboard(articleId: string): InlineKeyboard {
         { text: '💾 nadeliv 글감', callback_data: encodeCallback('save', articleId) },
         { text: '⏭ 건너뛰기', callback_data: encodeCallback('skip', articleId) },
       ],
+      // 아무 버튼도 안 누른 글은 며칠 뒤 다시 온다 — 평가 없이 읽음만 남기는 버튼
+      [{ text: '✅ 읽음', callback_data: encodeCallback('read', articleId) }],
     ],
   };
 }
@@ -51,13 +53,16 @@ export function buildItemKeyboard(articleId: string): InlineKeyboard {
 /**
  * 다이제스트 항목 1건 → Telegram HTML 메시지 (스펙 섹션 7 포맷).
  */
-export function formatItem(article: Article): string {
+export function formatItem(article: Article, opts: { resend?: boolean } = {}): string {
   const cat = CATEGORY_LABEL[article.category] ?? article.category;
   const slot = article.slot === 'explore' ? ' 🧭' : '';
   const icon = SOURCE_ICON[article.source] ?? SOURCE_ICON.blog;
-  const lines = [
-    `<b>[${escapeHtml(cat)}] ${icon}${slot} ${escapeHtml(article.title)}</b>`,
-  ];
+  const lines: string[] = [];
+  if (opts.resend) {
+    const sentOn = (article.lastSentAt ?? article.deliveredAt ?? '').slice(0, 10);
+    lines.push(`🔁 <i>읽음 표시가 없어 다시 보내요${sentOn ? ` (지난 전송 ${sentOn})` : ''}</i>`);
+  }
+  lines.push(`<b>[${escapeHtml(cat)}] ${icon}${slot} ${escapeHtml(article.title)}</b>`);
   if (article.summary) lines.push(escapeHtml(article.summary));
   if (article.aiOpinion) lines.push(`💡 추천이유: ${escapeHtml(article.aiOpinion)}`);
   if (typeof article.score === 'number') lines.push(`⭐ 점수: ${article.score}`);
@@ -106,24 +111,35 @@ export async function answerCallbackQuery(
   });
 }
 
-/** 헤더 1건 + 항목별 메시지 전송. */
+/** 다이제스트 헤더의 건수 표기. 재전송이 섞이면 따로 센다. */
+export function digestCountLabel(newCount: number, resendCount: number): string {
+  if (resendCount === 0) return `${newCount}건`;
+  if (newCount === 0) return `다시 보내는 글 ${resendCount}건`;
+  return `새 글 ${newCount}건 + 다시 보내는 글 ${resendCount}건`;
+}
+
+/** 헤더 1건 + 항목별 메시지 전송. resends = 읽음 표시가 없어 다시 보내는 글 (새 글 뒤에 붙는다). */
 export async function sendDigest(
   token: string,
   chatId: string,
   articles: Article[],
-  dateLabel: string
+  dateLabel: string,
+  resends: Article[] = []
 ): Promise<void> {
-  if (articles.length === 0) {
+  if (articles.length === 0 && resends.length === 0) {
     await sendMessage(token, chatId, `📭 ${escapeHtml(dateLabel)} 다이제스트: 새 글이 없습니다.`);
     return;
   }
   await sendMessage(
     token,
     chatId,
-    `🗞 <b>hariesse 다이제스트</b> — ${escapeHtml(dateLabel)} (${articles.length}건)`
+    `🗞 <b>hariesse 다이제스트</b> — ${escapeHtml(dateLabel)} (${digestCountLabel(articles.length, resends.length)})`
   );
   for (const a of articles) {
     await sendMessage(token, chatId, formatItem(a), buildItemKeyboard(a.articleId));
+  }
+  for (const a of resends) {
+    await sendMessage(token, chatId, formatItem(a, { resend: true }), buildItemKeyboard(a.articleId));
   }
 }
 

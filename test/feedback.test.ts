@@ -11,13 +11,13 @@ import {
 describe('encodeCallback / decodeCallback', () => {
   const articleId = 'a'.repeat(32);
 
-  it.each<FeedbackAction>(['like', 'site', 'save', 'skip'])('%s 라운드트립', (action) => {
+  it.each<FeedbackAction>(['like', 'site', 'save', 'skip', 'read'])('%s 라운드트립', (action) => {
     const data = encodeCallback(action, articleId);
     expect(decodeCallback(data)).toEqual({ action, articleId });
   });
 
   it('callback_data는 Telegram 제한 64바이트 이하', () => {
-    for (const action of ['like', 'site', 'save', 'skip'] as const) {
+    for (const action of ['like', 'site', 'save', 'skip', 'read'] as const) {
       expect(Buffer.byteLength(encodeCallback(action, articleId))).toBeLessThanOrEqual(64);
     }
   });
@@ -74,5 +74,16 @@ describe('clampWeight', () => {
   });
   it('상한 — 에코챔버 방지', () => {
     expect(clampWeight(99)).toBe(WEIGHT_MAX);
+  });
+});
+
+describe('read (읽음만 표시)', () => {
+  it('가중치·관심사는 건드리지 않고 상태만 read', () => {
+    const fx = feedbackEffects('read');
+    expect(fx.weightDelta).toBe(0);
+    expect(fx.likeCountDelta).toBe(0);
+    expect(fx.skipCountDelta).toBe(0);
+    expect(fx.bumpProfileInterests).toBe(false);
+    expect(fx.articleStatus).toBe('read');
   });
 });

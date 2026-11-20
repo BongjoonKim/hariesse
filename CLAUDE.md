@@ -14,6 +14,7 @@
 > **2026-10-18 단어장 의도 분류: 한글이 섞인 메시지는 새 표현/수정/이어 붙이기(append)로 Bedrock이 분류하고, "아까 문장에 추가로 …"는 마지막 카드에 이어 붙인다 — develop 머지(#15, 철자 교정 #13 포함), Prod 배포됨(#16).**
 > **2026-11-08 TOEFL Writing 문장 연습: Notion "TOEFL Writing"에 영어 문장을 적으면 매일 12:00 KST에 5문장씩 한국어 문제(영어 정답은 스포일러) — 2026-11-08 배포 완료 (HANDOFF 맨 위 블록).**
 > **2026-11-13 Writing 교정을 `문장`에 덮어쓰기: `교정` 칸 폐지. 오타는 타이핑 실수이므로 Bedrock이 고친 문장을 `문장`에 저장(원문 안 남김, `메모`에 무엇을 고쳤는지만) — develop PR, Prod 미반영. 기존 26행은 `scripts/migrate-writing-corrections.ts`로 옮김 — 2026-11-13 Prod 배포 완료(#21·#22, HANDOFF 맨 위 블록).**
+> **2026-11-20 다이제스트 읽음 표시·재전송: 버튼을 하나도 안 누른 글은 3일 뒤부터 하루 1건씩 읽을 때까지 다시 온다(`✅ 읽음` 버튼 추가). 전달 글 TTL은 전송 시점 + 90일, curate·deliver는 최근 수집순. Reddit 소스 9개 muted — develop PR, Prod 미반영 (HANDOFF 맨 위 블록).**
 > **⚠️ 작업이 끝나면 반드시 push + develop PR까지. 미머지 PR이 있으면 먼저 확인(2026-10-18, PR #13이 머지 안 된 채 #14가 배포된 사례).**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자 — 10/10 배포, 10/16 develop에 합침.**
@@ -50,7 +51,7 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
 
 ## 현재 상태: Phase 1 + Feedback + 소스 확장
 `Collection → Curation → Delivery → Feedback` 루프가 끝까지 동작.
-- 다이제스트 항목마다 인라인 버튼 `[👍 좋아요][⭐ 사이트 좋아요][💾 nadeliv 글감][⏭ 건너뛰기]`
+- 다이제스트 항목마다 인라인 버튼 `[👍 좋아요][⭐ 사이트 좋아요][💾 nadeliv 글감][⏭ 건너뛰기][✅ 읽음]`
   → Feedback Lambda가 Sources 가중치 ±, Profile 관심사 누적, Notion 상태 갱신 (액션당 1회 idempotent).
 - 소스 타입 3종: **blog RSS / YouTube 채널 / Reddit 서브레딧** (`Source.type`, 기본 `blog`).
 - **학습 트랙**: 다이제스트와 별개로 매일 20:00 KST에 레슨 1건. 범위는 cloud / backend / frontend / cicd 한정.
@@ -101,6 +102,7 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - `src/lib/telegram.ts` / `notion.ts` — 다이제스트 전송(+인라인 버튼) / URL 기준 upsert.
 - `src/domain/scoring.ts` — `rankAndSplit()` 활용/탐험 분배(순수함수, 테스트 대상).
 - `src/domain/feedback.ts` — callback_data 인코딩/디코딩 + 액션별 효과(순수함수, 테스트 대상).
+- `src/domain/digest.ts` — 읽음 판정/재전송 대상 선택/전송 기준 TTL(순수함수, 테스트 대상).
 - `src/domain/curriculum.ts` — 학습 트랙 목차(트랙·레슨·핵심 포인트·공식 문서 링크). **데이터만.**
 - `src/domain/learning.ts` — 진도 계산/레슨 버튼/관련 글 선택(순수함수, 테스트 대상).
 - `src/domain/vocab.ts` — 단어장 입력 파싱/정규화 키/Leitner 복습/callback(순수함수, 테스트 대상).
@@ -113,7 +115,11 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 ## 코딩 규칙 / 가드레일
 - **dedup·idempotency**: articleId = `hashUrl(url)`. collect는 `putArticleIfNew`(조건부 put), Notion은 URL 기준 upsert.
 - **일일 상한**: collect 신규 글 수 ≤ `dailyCurateCap`, curate Bedrock 호출 ≤ `dailyBedrockCap` (SSM).
-- **TTL**: Articles `ttl`(기본 30일)로 미독 자동 정리.
+- **TTL**: Articles `ttl`(수집 + 30일)로 전달 안 된 글 자동 정리. **전달된 글은 전송할 때마다 전송 시점 + 90일로 다시 잡는다**(`markDelivered`)
+  — 수집 기준 그대로면 늦게 전달된 글이 버튼을 누르기 전에 지워져 "이미 만료된 글"이 뜬다(2026-11-20).
+- **읽음 = 아무 버튼이나**: 모든 피드백 액션이 `readAt`을 찍는다(`markArticleFeedbackOnce`). 전달됐고 `isRead`가 아닌 글은 `RESEND_AFTER_DAYS`(3일)마다
+  다이제스트 1회에 `RESEND_PER_DIGEST`(1건)씩 **읽을 때까지** 다시 보낸다(`src/domain/digest.ts`). 횟수 상한을 넣지 말 것(사용자 결정). 새 글 자리는 최소 1건 남긴다.
+- **curate·deliver는 최근 수집순**: `listArticlesByStatus(..., newestFirst=true)`. 오래된 순으로 되돌리면 적체가 생겼을 때 몇 주 묵은 글만 나간다.
 - **동시성**: Lambda `reservedConcurrentExecutions: 2`. DynamoDB on-demand.
 - **탐험/활용**: 매 다이제스트 explore 비율 = `EXPLORATION_RATIO`(기본 0.3). 에코챔버 방지 — 이 분배를 함부로 0으로 만들지 말 것.
 - **순수함수 우선**: 스코어링/추출/피드파싱 로직은 네트워크와 분리해 단위테스트 가능하게.
