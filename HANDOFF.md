@@ -2,7 +2,11 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
-> 🌐 **2026-11-22 웹 "오늘의 미션" 증분 — develop PR, Prod 미반영** (브랜치 `claude/hariesse-aws-web-ef5304`).
+> 🌐 **2026-11-22 웹 "오늘의 미션" 증분 — 2026-11-22 배포 완료** (PR #26 → develop 095590c, Prod PR #28 → dd7d03a, Deploy 워크플로 성공).
+> 배포 확인: 스택 `HariesseWeb` CREATE_COMPLETE, `WebFn` = `HariesseWeb-WebFn0533AA85-6l8F4eEQ9Lzl`, 학습 테이블 = `HariesseWeb-StudyED7BE9FA-18C7T239NKHFN`, CloudFront `d34mgdzf9157iq.cloudfront.net`.
+> `https://hariesse.nadeliv.com/` 200(index·app.js·style.css), 쿠키 없는 `/api/today`·`/api/sync` 401, http → https 301. 첫 동기화 수동 invoke(`{"type":"sync"}`) → 단어장 151행·Writing 70행 사본 생성.
+> (참고: 먼저 머지한 Prod PR #27은 #26이 develop에 안 들어간 상태라 변경 없이 배포됐다 — develop → Prod 전에 작업 PR이 develop에 머지됐는지 확인할 것.)
+> **아직 안 한 것**: 비밀번호 변경(사용자), 로그인 후 E2E(아래 "남은 일" 1~3).
 > 사용자 요청: "Telegram만으로는 영어 정보를 한 번에 보기도, 등록하기도, 원하는 복습을 하기도 어렵다. 듀오링고처럼 매일의 미션을 주는 간단한 웹.
 > 크게는 기술 글·영어 공부·책 읽기 같은 내 할 일을 미루지 않게 하는 원동력." → Telegram은 그대로 두고(보조 알림) 웹을 추가한다.
 > - **결정(사용자 선택)**: 백엔드 = 서버리스(nadeliv EC2 아님), 로그인 = 비밀번호 1개, 주소 = `https://hariesse.nadeliv.com`, 미션 = 단어 복습·Writing 영작·새 표현 등록 + 기술 글 읽기·책 읽기.
@@ -20,8 +24,8 @@
 >   `npm run web:preview` = AWS 없이 가짜 데이터로 화면 확인(http://localhost:4173, 비밀번호 `preview`).
 > - 공유 리팩터: 단어 1건 저장을 `src/lib/vocab-capture.ts`(`captureExpression`)로 뺐다 — VocabFn(Telegram)과 WebFn이 같이 쓴다. `입력 경로`에 `Web` 추가.
 > - 검증: `tsc`, 단위테스트 233개(신규 47: missions·web-auth·mirror·web-handler), `cdk synth` + `synth:design` 성공(디자인 stage엔 Web 스택 없음), 미리보기로 5개 화면·복습·영작 흐름 확인.
->   **실제 AWS에서는 아직 한 번도 안 돌았다** (배포 전).
-> - **남은 일 (Prod 머지 후)**:
+>   (배포 전 기준. 배포 후 확인은 위 "배포 확인" 줄.)
+> - **남은 일 (배포됨 — 사용자 확인 대기)**:
 >   1. 비밀번호 정하기 — 배포가 무작위 24자를 넣어 둔다. 바꾸려면
 >      `aws secretsmanager put-secret-value --secret-id hariesse/web-password --secret-string '<8자 이상>' --region ap-northeast-2`
 >      후 WebFn 콜드스타트(설정을 건드리거나 몇 분 대기) — 비밀번호를 바꾸면 기존 로그인은 전부 풀린다.
