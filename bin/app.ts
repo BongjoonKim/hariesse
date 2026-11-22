@@ -4,6 +4,7 @@ import { DataStack } from '../lib/stacks/data-stack';
 import { PipelineStack } from '../lib/stacks/pipeline-stack';
 import { ApiStack } from '../lib/stacks/api-stack';
 import { OperatorStack } from '../lib/stacks/operator-stack';
+import { WebStack, type WebDomain } from '../lib/stacks/web-stack';
 import { stackPrefix } from '../src/lib/constants';
 
 const app = new cdk.App();
@@ -31,6 +32,10 @@ if (stage && !/^[a-z][a-z0-9]{1,15}$/.test(stage)) {
 }
 const learning = ctx('learning') !== 'false'; // 기본 켜짐. 디자인 배포는 -c learning=false
 const vocab = ctx('vocab') !== 'false'; // TOEFL 단어장. 기본 켜짐. 디자인 배포는 -c vocab=false
+// 웹(CloudFront + WebFn + 학습 테이블). TOEFL과 같이 내 배포 전용 — stage 배포·vocab=false면 없음. -c web=false 로 끌 수 있다.
+const web = vocab && !stage && ctx('web') !== 'false';
+// 사용자 도메인은 cdk.json context `webDomain` (없으면 CloudFront 기본 주소)
+const webDomain = app.node.tryGetContext('webDomain') as WebDomain | undefined;
 const operator = ctx('operator') === 'true'; // 운영자 IAM 사용자 스택 (stage 필수)
 const operatorDeploy = ctx('operatorDeploy') === 'true'; // 운영자에게 cdk deploy 권한까지 (기본 꺼짐)
 const P = stackPrefix(stage);
@@ -58,6 +63,18 @@ const api = new ApiStack(app, `${P}Api`, {
   vocabFn: pipeline.vocabFn,
   writingFn: pipeline.writingFn,
 });
+
+if (web) {
+  new WebStack(app, `${P}Web`, {
+    env,
+    stage,
+    sourcesTable: data.sourcesTable,
+    articlesTable: data.articlesTable,
+    profileTable: data.profileTable,
+    rawBucket: data.rawBucket,
+    domain: webDomain,
+  });
+}
 
 if (operator) {
   if (!stage) throw new Error('-c operator=true 는 -c stage=<name> 과 함께 써야 한다 (내 기본 배포에는 운영자 사용자를 만들지 않는다)');

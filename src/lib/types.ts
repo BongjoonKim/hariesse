@@ -90,7 +90,7 @@ export interface LessonContent {
 export type VocabKind = 'word' | 'sentence';
 /** new = 아직 뜻을 안 채움(Notion에 직접 넣은 직후 등), learning = 복습 중, mastered = 외움(복습 끝) */
 export type VocabStatus = 'new' | 'learning' | 'mastered';
-export type VocabOrigin = 'telegram' | 'notion';
+export type VocabOrigin = 'telegram' | 'notion' | 'web';
 
 /** Bedrock이 채워주는 단어 정보. 문장이면 meaning = 한국어 번역. */
 export interface VocabEnrichment {

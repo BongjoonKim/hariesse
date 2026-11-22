@@ -26,7 +26,7 @@ export const VOCAB_PROP = {
   origin: '입력 경로',
 } as const;
 
-export const ORIGIN_LABEL: Record<VocabOrigin, string> = { telegram: 'Telegram', notion: 'Notion' };
+export const ORIGIN_LABEL: Record<VocabOrigin, string> = { telegram: 'Telegram', notion: 'Notion', web: 'Web' };
 
 function invert<T extends string>(m: Record<T, string>): Record<string, T> {
   return Object.fromEntries(Object.entries(m).map(([k, v]) => [v, k])) as Record<string, T>;
