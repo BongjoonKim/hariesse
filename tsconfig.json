@@ -17,6 +17,6 @@
     "types": ["node", "jest"],
     "outDir": "dist"
   },
-  "include": ["bin/**/*.ts", "lib/**/*.ts", "src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
+  "include": ["bin/**/*.ts", "lib/**/*.ts", "src/**/*.ts", "scripts/**/*.ts", "test/**/*.ts", "web/src/**/*.ts"],
   "exclude": ["node_modules", "cdk.out", "dist"]
 }
