@@ -5,6 +5,12 @@
     "exclude": ["README.md", "cdk*.json", "**/*.d.ts", "**/*.js", "node_modules", "test", "dist"]
   },
   "context": {
+    "webDomain": {
+      "domainName": "hariesse.nadeliv.com",
+      "certificateArn": "arn:aws:acm:us-east-1:611288736262:certificate/cc83bd01-5c11-4c65-9e62-96898fc8a12a",
+      "hostedZoneId": "Z07719991W3Q5C6JQ8QC2",
+      "zoneName": "nadeliv.com"
+    },
     "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/aws-iam:minimizePolicies": true,

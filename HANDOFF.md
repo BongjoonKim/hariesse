@@ -2,6 +2,37 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
+> 🌐 **2026-11-22 웹 "오늘의 미션" 증분 — 2026-11-22 배포 완료** (PR #26 → develop 095590c, Prod PR #28 → dd7d03a, Deploy 워크플로 성공).
+> 배포 확인: 스택 `HariesseWeb` CREATE_COMPLETE, `WebFn` = `HariesseWeb-WebFn0533AA85-6l8F4eEQ9Lzl`, 학습 테이블 = `HariesseWeb-StudyED7BE9FA-18C7T239NKHFN`, CloudFront `d34mgdzf9157iq.cloudfront.net`.
+> `https://hariesse.nadeliv.com/` 200(index·app.js·style.css), 쿠키 없는 `/api/today`·`/api/sync` 401, http → https 301. 첫 동기화 수동 invoke(`{"type":"sync"}`) → 단어장 151행·Writing 70행 사본 생성.
+> (참고: 먼저 머지한 Prod PR #27은 #26이 develop에 안 들어간 상태라 변경 없이 배포됐다 — develop → Prod 전에 작업 PR이 develop에 머지됐는지 확인할 것.)
+> **아직 안 한 것**: 비밀번호 변경(사용자), 로그인 후 E2E(아래 "남은 일" 1~3).
+> 사용자 요청: "Telegram만으로는 영어 정보를 한 번에 보기도, 등록하기도, 원하는 복습을 하기도 어렵다. 듀오링고처럼 매일의 미션을 주는 간단한 웹.
+> 크게는 기술 글·영어 공부·책 읽기 같은 내 할 일을 미루지 않게 하는 원동력." → Telegram은 그대로 두고(보조 알림) 웹을 추가한다.
+> - **결정(사용자 선택)**: 백엔드 = 서버리스(nadeliv EC2 아님), 로그인 = 비밀번호 1개, 주소 = `https://hariesse.nadeliv.com`, 미션 = 단어 복습·Writing 영작·새 표현 등록 + 기술 글 읽기·책 읽기.
+>   2026-10-04에 보류한 "관리자 웹"(소스·설정 운영)과는 다른 것이다 — 운영은 여전히 Claude Code 세션에서 한다.
+> - **`HariesseWeb` 스택** (`lib/stacks/web-stack.ts`, 내 배포 전용 — stage 배포·`vocab=false`·`-c web=false`면 안 만든다):
+>   CloudFront(`/` → S3 정적 프론트 OAC, `/api/*` → `WebFn` Function URL) + 학습 테이블(DynamoDB pk/sk, RETAIN) + Secrets `hariesse/web-password` + EventBridge 30분마다 동기화.
+>   도메인은 `cdk.json` context `webDomain` — nadeliv.com 호스팅 영역(`Z07719991W3Q5C6JQ8QC2`)과 us-east-1의 기존 와일드카드 인증서(`*.nadeliv.com`, nadeliv CloudFront와 공유)를 쓴다. 새 인증서·교차 리전 스택 없음.
+> - **데이터**: Notion이 여전히 원본. 학습 테이블에 단어장·Writing **사본**(`VOCAB`/`WRITING`)을 두고 웹은 사본을 읽는다(전체를 한 번에). 웹에서 바꾸면 Notion에 먼저 쓰고 사본을 같이 고친다.
+>   Telegram·Notion에서 바꾼 것은 30분 동기화(또는 웹을 열 때 사본이 10분 넘었으면 자동, 기록 탭의 "지금 동기화")로 들어온다. 바뀐 행만 쓴다(`diffMirror`). Notion이 0건을 주면 사본을 지우지 않는다.
+>   일별 미션 기록(`DAY`/날짜)·설정·로그인 실패 횟수(`META`)는 학습 테이블에만 있다 → 테이블 RETAIN.
+> - **미션 계산** (`src/domain/missions.ts`): 단어 복습 = 미러에서 `마지막 복습`이 오늘인 표현 수(Telegram 21:00 버튼으로 답한 것도 센다), 목표 = min(설정, 차례인 것).
+>   Writing = 웹에서 직접 써 본 문장만(Telegram 12:00 출제는 안 센다). 등록 = 오늘 추가된 표현+문장(어디서 넣든). 기술 글·책 = 웹에서 체크. 전부 끝내면 하루 완료 → 연속 기록 🔥.
+>   차례가 아닌 표현을 골라 복습할 때 "알아요"는 일정을 안 바꾼다("몰라요"만 박스 1) — 간격 반복을 지키려고.
+> - **프론트** (`web/`): 프레임워크 없는 TS + esbuild. `cdk synth` 때 `web/dist`로 빌드된다(따로 빌드 단계 없음, dist는 커밋 안 함). 탭 5개: 오늘 / 단어장 / 문장 / 읽기 / 기록.
+>   `npm run web:preview` = AWS 없이 가짜 데이터로 화면 확인(http://localhost:4173, 비밀번호 `preview`).
+> - 공유 리팩터: 단어 1건 저장을 `src/lib/vocab-capture.ts`(`captureExpression`)로 뺐다 — VocabFn(Telegram)과 WebFn이 같이 쓴다. `입력 경로`에 `Web` 추가.
+> - 검증: `tsc`, 단위테스트 233개(신규 47: missions·web-auth·mirror·web-handler), `cdk synth` + `synth:design` 성공(디자인 stage엔 Web 스택 없음), 미리보기로 5개 화면·복습·영작 흐름 확인.
+>   (배포 전 기준. 배포 후 확인은 위 "배포 확인" 줄.)
+> - **남은 일 (배포됨 — 사용자 확인 대기)**:
+>   1. 비밀번호 정하기 — 배포가 무작위 24자를 넣어 둔다. 바꾸려면
+>      `aws secretsmanager put-secret-value --secret-id hariesse/web-password --secret-string '<8자 이상>' --region ap-northeast-2`
+>      후 WebFn 콜드스타트(설정을 건드리거나 몇 분 대기) — 비밀번호를 바꾸면 기존 로그인은 전부 풀린다.
+>   2. `https://hariesse.nadeliv.com` 접속 → 로그인 → 첫 동기화가 자동으로 돈다(단어장 행 수만큼 몇 초). 기록 탭에서 하루 목표·읽는 책 설정.
+>   3. E2E 확인: 복습 답이 Notion 박스에 반영되는지, 등록한 표현이 Notion에 생기는지, Telegram에서 답한 복습이 동기화 뒤 미션에 잡히는지.
+> - 후속 아이디어: 읽기 탭에서 레슨 본문 보기(지금은 제목+공식 문서 링크만), 독서 기록(책별 진도), Telegram 아침 메시지에 "오늘 미션 n개" 링크, 홈 화면 앱(PWA) 아이콘.
+
 > 🔁 **2026-11-20 다이제스트: 읽음 표시 + 안 읽은 글 재전송 + 최신 글 우선 — develop PR, Prod 미반영.**
 > 발단: ⏭ 건너뛰기를 누르면 "이미 만료된 글이에요". 원인은 버튼이 아니라 **적체 + 수집 기준 TTL**.
 > - 진단(11/20): Articles `status=unread` 813건. curate·deliver가 `status-index`(정렬키 `collectedAt`)를 **오래된 순**으로 200/300건만 봐서,
@@ -30,7 +61,7 @@
 > - **기존 행 마이그레이션 — 2026-11-13 실행 완료(Mac 세션, 사용자 승인)**: `교정`이 채워진 행 26건(전부 오타·문법 수정, 예 "finialized → finalized.", "I'm appreciate → I appreciate your")의
 >   `문장`·`키`를 교정 문장으로 바꾸고 `교정`을 비움. 재실행 dry-run 0건, 샘플 행 확인. 다시 돌릴 일은 없지만 명령은:
 >   `NOTION_TOKEN=$(aws secretsmanager get-secret-value --secret-id hariesse/notion-token --region ap-northeast-2 --query SecretString --output text) WRITING_DB=205a87eb3c20434b896d33213d051501 npx ts-node scripts/migrate-writing-corrections.ts --apply`
->   (`--apply` 없으면 dry-run). Notion의 `교정` 속성은 이제 전부 비어 있으니 지워도 된다(코드는 무관).
+>   (`--apply` 없으면 dry-run). **Notion DB의 `교정` 속성은 2026-11-13 삭제함**(API PATCH `properties.교정=null`, 삭제 전 채워진 행 0건 확인). 코드는 무관.
 > - 검증: `tsc`, 단위테스트 186개(Writing 테스트 갱신), `cdk synth` 성공.
 > - **남은 일**: 다음 12:00 KST 발송(2026-11-14)에서 스포일러에 "내가 쓴 것" 줄이 없는지 확인.
 

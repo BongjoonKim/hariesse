@@ -117,6 +117,20 @@ export function listWritingCandidates(token: string, databaseId: string, limit: 
   );
 }
 
+export async function createWritingPage(token: string, databaseId: string, fields: WritingFields): Promise<string> {
+  const page = (await notionFetch(token, '/pages', 'POST', {
+    parent: { database_id: databaseId },
+    properties: buildWritingProperties(fields),
+  })) as NotionPage;
+  return compactPageId(page.id);
+}
+
+/** 휴지통에 있는 페이지면 undefined. */
+export async function getWritingPage(token: string, pageId: string): Promise<WritingEntry | undefined> {
+  const page = (await notionFetch(token, `/pages/${pageId}`, 'GET')) as NotionPage;
+  return page.archived || page.in_trash ? undefined : parseWritingPage(page);
+}
+
 export async function updateWritingPage(token: string, pageId: string, fields: WritingFields): Promise<void> {
   await notionFetch(token, `/pages/${pageId}`, 'PATCH', { properties: buildWritingProperties(fields) });
 }

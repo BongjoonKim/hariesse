@@ -21,6 +21,8 @@ export const ENV = {
   VOCAB_FUNCTION_NAME: 'VOCAB_FUNCTION_NAME',
   /** Feedback Lambda → TOEFL Writing Lambda 비동기 호출용(/writing). 없으면 Writing 연습 꺼짐. */
   WRITING_FUNCTION_NAME: 'WRITING_FUNCTION_NAME',
+  /** 웹(WebFn)용 학습 미러 테이블 — Notion 단어장·Writing 사본 + 일별 미션 기록. */
+  STUDY_TABLE: 'STUDY_TABLE',
 } as const;
 
 /** stage → SSM/Secrets 접두어. stage가 없거나 빈 문자열이면 기존 이름 그대로. */
@@ -68,6 +70,8 @@ export function secretNames(prefix: string) {
     TELEGRAM_BOT_TOKEN: `${prefix}/telegram-bot-token`,
     NOTION_TOKEN: `${prefix}/notion-token`,
     TELEGRAM_WEBHOOK_SECRET: `${prefix}/telegram-webhook-secret`,
+    /** 웹 로그인 비밀번호 — WebStack이 만들고(무작위 초기값) 사용자가 바꿔 쓴다. */
+    WEB_PASSWORD: `${prefix}/web-password`,
   } as const;
 }
 

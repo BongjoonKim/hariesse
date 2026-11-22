@@ -15,6 +15,7 @@
 > **2026-11-08 TOEFL Writing 문장 연습: Notion "TOEFL Writing"에 영어 문장을 적으면 매일 12:00 KST에 5문장씩 한국어 문제(영어 정답은 스포일러) — 2026-11-08 배포 완료 (HANDOFF 맨 위 블록).**
 > **2026-11-13 Writing 교정을 `문장`에 덮어쓰기: `교정` 칸 폐지. 오타는 타이핑 실수이므로 Bedrock이 고친 문장을 `문장`에 저장(원문 안 남김, `메모`에 무엇을 고쳤는지만) — develop PR, Prod 미반영. 기존 26행은 `scripts/migrate-writing-corrections.ts`로 옮김 — 2026-11-13 Prod 배포 완료(#21·#22, HANDOFF 맨 위 블록).**
 > **2026-11-20 다이제스트 읽음 표시·재전송: 버튼을 하나도 안 누른 글은 3일 뒤부터 하루 1건씩 읽을 때까지 다시 온다(`✅ 읽음` 버튼 추가). 전달 글 TTL은 전송 시점 + 90일, curate·deliver는 최근 수집순. Reddit 소스 9개 muted — develop PR, Prod 미반영 (HANDOFF 맨 위 블록).**
+> **2026-11-22 웹 "오늘의 미션": `https://hariesse.nadeliv.com` (CloudFront + S3 + WebFn + 학습 테이블). 단어 복습·Writing 영작·등록·기술 글·책 읽기를 하루 미션으로 묶고 연속 기록을 준다. Notion이 원본, DynamoDB는 사본 — 2026-11-22 Prod 배포 완료(#26·#28, HANDOFF 맨 위 블록). 로그인 후 E2E는 미확인.**
 > **⚠️ 작업이 끝나면 반드시 push + develop PR까지. 미머지 PR이 있으면 먼저 확인(2026-10-18, PR #13이 머지 안 된 채 #14가 배포된 사례).**
 > **운영(소스 추가·상태 확인·설정 조정)은 관리자 웹 없이 Claude Code 세션에서 한다 (2026-10-04 결정, HANDOFF §2).**
 > **2026-10-04 stage 분리: 같은 계정에 두 번째 배포(`stage=design`, 디자인 다이제스트) + 운영 전용 IAM 사용자 — 10/10 배포, 10/16 develop에 합침.**
@@ -65,6 +66,9 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
 - **TOEFL Writing 문장 연습**: Notion "TOEFL Writing" DB에 `문장`(교재 연습하며 쓴 영어)만 적으면 Bedrock이 `한국어`(문제)·`메모`를
   채우고, 매일 12:00 KST에 덜 나온 문장부터 5개를 한 메시지로 보낸다 — 한국어만 보이고 영어는 `<tg-spoiler>`. 버튼·채점 없음. `/writing` = 지금 바로.
   문법·철자를 고친 문장은 `문장`에 **덮어쓴다**(오타 = 타이핑 실수, 원문은 안 남김). **원본 저장소는 Notion DB**. `상태=제외`면 출제 안 함. 사용자가 직접 쓴 한국어·메모는 덮지 않는다.
+- **웹 "오늘의 미션"** (`https://hariesse.nadeliv.com`, 내 배포 전용): Telegram은 알림, 웹은 한 번에 보고·등록하고·골라서 복습하는 곳.
+  미션 5종(단어 복습 / Writing 영작 / 새 표현 등록 / 기술 글 읽기 / 책 읽기)을 다 하면 하루 완료 → 연속 기록 🔥. 목표는 기록 탭에서 바꾼다(0 = 끔).
+  웹의 복습 답은 Telegram 버튼과 같은 Leitner 박스를 쓴다. 비밀번호 1개 로그인(Secrets `hariesse/web-password`).
 - **제외(다음 증분)**: Sources 가중치의 스코어링 반영, Profile 패턴학습,
   Discovery 파이프라인, layoutType, arXiv/HN 소스 확장.
 
@@ -76,6 +80,8 @@ Mac과 Windows PC 두 곳에서 작업한다. Claude Code의 세션·메모리(`
   + WritingFn(TOEFL Writing 출제) + EventBridge(매일 12:00 KST = 03:00 UTC).
 - **ApiStack**: Feedback Lambda + Function URL(Telegram webhook, secret_token 헤더 인증).
   버튼(callback_query) + 메시지(message → VocabFn 비동기 호출, `/writing` → WritingFn). 둘 다 PipelineStack에 있고 cross-stack으로 넘긴다.
+- **WebStack**: CloudFront(`/` → S3 정적 프론트, `/api/*` → WebFn Function URL) + 학습 테이블(DynamoDB pk/sk) + EventBridge(30분마다 Notion → 사본 동기화).
+  도메인·인증서는 `cdk.json` context `webDomain`(nadeliv.com 호스팅 영역 + us-east-1 `*.nadeliv.com` 인증서 — nadeliv와 공유, 지우지 말 것).
 - **LLM**: Amazon Bedrock(Claude), 서울 리전 ap-northeast-2. 모델 ID는 SSM 분리, 교차리전 추론 프로파일(`apac.*`).
 
 ## 데이터 흐름
@@ -110,7 +116,13 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
   `notionFetch`/`queryDatabase`/속성 파서는 export — Writing DB도 같이 쓴다.
 - `src/domain/writing.ts` — Writing 문장 연습: 채우기 대상/교정 반영(`applyWritingEnrichment`)/출제 순서(순수함수, 테스트 대상).
 - `src/lib/notion-writing.ts` — "TOEFL Writing" DB 속성 매핑(`WRITING_PROP`) + 조회/갱신.
-- `src/handlers/{collect,curate,deliver,feedback,learn,vocab,writing}/index.ts` — Lambda 핸들러.
+- `src/lib/vocab-capture.ts` — 표현 1건 저장(`captureExpression`). VocabFn(Telegram)과 WebFn이 같이 쓴다.
+- `src/domain/missions.ts` — 오늘의 미션/하루 완료/연속 기록(순수함수, 테스트 대상). 미션 추가는 `MissionId` + `buildMissions`.
+- `src/domain/web-auth.ts` — 비밀번호 비교·세션 토큰(HMAC)·로그인 잠금(순수함수, 테스트 대상).
+- `src/domain/mirror.ts` — Notion ↔ 사본 비교(`diffMirror`, 순수함수). `src/lib/study-store.ts` — 학습 테이블 CRUD + `syncFromNotion`.
+- `src/lib/web-types.ts` — 웹 API 응답 타입(WebFn과 프론트 공용, 타입만).
+- `web/` — 프론트(프레임워크 없는 TS). `web/src/main.ts`(라우터) · `today.ts` · `session.ts`(복습·영작) · `library.ts`(단어장·문장) · `pages.ts`(읽기·기록·로그인). `web/public/`은 그대로 복사.
+- `src/handlers/{collect,curate,deliver,feedback,learn,vocab,writing,web}/index.ts` — Lambda 핸들러.
 
 ## 코딩 규칙 / 가드레일
 - **dedup·idempotency**: articleId = `hashUrl(url)`. collect는 `putArticleIfNew`(조건부 put), Notion은 URL 기준 upsert.
@@ -146,6 +158,12 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 - **Writing 교정은 `문장`에 덮어쓴다** (사용자 결정 2026-11-13, 그 전엔 `교정` 칸에 따로 뒀음): 문장의 오류는 타이핑 실수라 쓴 것과 고친 것을 비교하지 않는다.
   Bedrock `corrected`가 쓴 것과 조금이라도 다르면(대소문자·문장부호 포함) `문장`·`키`를 그걸로 바꾼다(`applyWritingEnrichment`). 원문은 어디에도 남기지 않고 `메모`에 무엇을 고쳤는지만.
   `교정` 속성은 코드에서 읽지도 쓰지도 않는다 — DB에 칸이 남아 있어도 무시. 출제 상태 기록은 `applyQuizSent` 필드만 PATCH — 사용자가 손댄 칸을 다시 쓰지 않게.
+- **웹: Notion이 원본, 학습 테이블은 사본**: 웹에서 바꿀 때는 **Notion에 먼저 쓰고** 사본을 고친다(순서를 바꾸면 다음 동기화가 되돌린다). 사본만 고치는 코드를 만들지 말 것.
+  단, 일별 미션 기록(`DAY`)·설정·로그인 상태(`META`)는 학습 테이블에만 있다 — 테이블은 RETAIN, 지우면 연속 기록이 사라진다.
+- **웹 인증**: `/api/login` 말고는 전부 세션 쿠키 검증을 거친다(핸들러 맨 앞). 새 경로를 추가할 때 그 검증 뒤(`switch`)에 넣을 것. POST는 `x-hariesse` 헤더 필수(CSRF).
+  Function URL은 공개(`authType NONE`)라 **핸들러의 검증이 유일한 방어선**이다. 비밀번호는 로그에 찍지 말 것. 5회 틀리면 15분 잠금(`web-auth.ts`) — 풀지 말 것.
+- **웹 복습은 간격 반복을 깨지 않게**: 복습할 차례가 아닌 표현의 "알아요"는 박스를 올리지 않는다(`reviewVocab`). Writing 미션은 웹에서 써 본 문장만 센다.
+- **프론트 빌드는 synth 안에서**: `web-stack.ts`의 `buildWebAssets()`가 `web/dist`를 만든다. `.gitignore`가 `*.js`를 막으므로 프론트 소스는 `.ts`로만 쓴다.
 - **SSM GetParameters는 1회 10개까지**: `getConfig()`가 10개씩 나눠 조회한다. SSM 이름을 늘려도 그대로 둘 것.
 - **시크릿은 코드/리포에 두지 않음**: Secrets Manager(`hariesse/*`) + SSM(`/hariesse/*`)에서만 읽음.
 
@@ -156,6 +174,8 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
   writing-notion-database-id(비면 Writing 꺼짐), writing-quiz-size(기본 5).
 - 다이제스트 건수: 점수 ≥ `digest-min-score`(기본 70)인 글 수를 [`digest-min-size`(2), `digest-size`(4)]로 클램프.
 - Secrets `hariesse/telegram-bot-token`, `hariesse/notion-token`.
+  `hariesse/web-password`(웹 로그인, WebStack이 무작위 초기값으로 만든다 — 값은 사용자가 바꾼다. 8자 미만이면 로그인 자체가 막힌다).
+- 웹: 하루 목표·읽는 책은 SSM이 아니라 웹 기록 탭에서 바꾼다(학습 테이블 `META/settings`). 테이블 이름은 스택 출력 `HariesseWeb.StudyTableName`.
 - Notion DB ID (생성됨): `a22cbf53637840dc867d6cd8e7b2614e` (봉준 개발목록(구 My secretary) 페이지 하위, DB명 "hariesse Archive").
 - TOEFL 단어장 Notion DB: `5582e65c809b45e1b420325db9fc9adb` (DB명 "TOEFL Vocab"). **2026-11-08부터 "Haries Story / Toefl" 페이지(`40be549ed102806f9a4ed680d0ff9ad4`) 하위.**
 - TOEFL Writing Notion DB: `205a87eb3c20434b896d33213d051501` (DB명 "TOEFL Writing", 같은 Toefl 페이지 하위).
@@ -165,6 +185,7 @@ EventBridge(매일) → SFN: Collect(소스타입별 fetch+dedup+본문 S3) → 
 ```
 npm install
 npm test                 # scoring + extract 단위테스트
+npm run web:preview      # 웹 화면만 가짜 데이터로 확인 (http://localhost:4173, 비밀번호 preview)
 npm run build            # tsc --noEmit 타입체크
 npx cdk synth            # 합성 (PR마다 CI가 위 3개를 돌린다: .github/workflows/ci.yml)
 # 배포 = develop → Prod PR 머지. 로컬 cdk deploy 금지 (위 "브랜치 / 배포 규칙")
