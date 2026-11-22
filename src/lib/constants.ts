@@ -93,6 +93,11 @@ export const DEFAULTS = {
   DIGEST_MIN_SIZE: 2,
   DIGEST_MIN_SCORE: 70,
   ARTICLE_TTL_DAYS: 30,
+  // 전달된 글은 보낼 때마다 TTL을 다시 잡는다 — 버튼을 누를 수 있어야 하고, 피드에 남은 글이 새 글로 재수집되지 않게.
+  DELIVERED_TTL_DAYS: 90,
+  // 읽음 표시가 없는 글 재전송: 마지막 전송 후 N일 지나면, 다이제스트 1회에 M건까지
+  RESEND_AFTER_DAYS: 3,
+  RESEND_PER_DIGEST: 1,
   // TOEFL 단어장: 하루 복습 퀴즈 수 / 복습 실행 1회당 뜻 채우기(Bedrock) 상한
   VOCAB_REVIEW_SIZE: 10,
   VOCAB_ENRICH_CAP: 20,

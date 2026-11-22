@@ -13,8 +13,9 @@ export const handler = async (): Promise<CurateResult> => {
   const profile = await getProfile(cfg.profileTable);
   const interests = profile?.interests ?? {};
 
-  // 아직 큐레이션되지 않은(unread + score 없음) 글
-  const unread = await listArticlesByStatus(cfg.articlesTable, 'unread', 200);
+  // 아직 큐레이션되지 않은(unread + score 없음) 글 — 최근 수집한 것부터.
+  // 오래된 것부터 보면 적체가 생겼을 때 3주 묵은 글만 큐레이션·전달된다 (2026-11 사례).
+  const unread = await listArticlesByStatus(cfg.articlesTable, 'unread', 200, true);
   const pending = unread.filter((a) => typeof a.score !== 'number');
 
   let curated = 0;

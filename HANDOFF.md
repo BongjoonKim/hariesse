@@ -2,7 +2,11 @@
 
 새 세션에서 이 프로젝트를 이어받기 위한 문서.
 
-> 🌐 **2026-11-22 웹 "오늘의 미션" 증분 — develop PR, Prod 미반영** (브랜치 `claude/hariesse-aws-web-ef5304`).
+> 🌐 **2026-11-22 웹 "오늘의 미션" 증분 — 2026-11-22 배포 완료** (PR #26 → develop 095590c, Prod PR #28 → dd7d03a, Deploy 워크플로 성공).
+> 배포 확인: 스택 `HariesseWeb` CREATE_COMPLETE, `WebFn` = `HariesseWeb-WebFn0533AA85-6l8F4eEQ9Lzl`, 학습 테이블 = `HariesseWeb-StudyED7BE9FA-18C7T239NKHFN`, CloudFront `d34mgdzf9157iq.cloudfront.net`.
+> `https://hariesse.nadeliv.com/` 200(index·app.js·style.css), 쿠키 없는 `/api/today`·`/api/sync` 401, http → https 301. 첫 동기화 수동 invoke(`{"type":"sync"}`) → 단어장 151행·Writing 70행 사본 생성.
+> (참고: 먼저 머지한 Prod PR #27은 #26이 develop에 안 들어간 상태라 변경 없이 배포됐다 — develop → Prod 전에 작업 PR이 develop에 머지됐는지 확인할 것.)
+> **아직 안 한 것**: 비밀번호 변경(사용자), 로그인 후 E2E(아래 "남은 일" 1~3).
 > 사용자 요청: "Telegram만으로는 영어 정보를 한 번에 보기도, 등록하기도, 원하는 복습을 하기도 어렵다. 듀오링고처럼 매일의 미션을 주는 간단한 웹.
 > 크게는 기술 글·영어 공부·책 읽기 같은 내 할 일을 미루지 않게 하는 원동력." → Telegram은 그대로 두고(보조 알림) 웹을 추가한다.
 > - **결정(사용자 선택)**: 백엔드 = 서버리스(nadeliv EC2 아님), 로그인 = 비밀번호 1개, 주소 = `https://hariesse.nadeliv.com`, 미션 = 단어 복습·Writing 영작·새 표현 등록 + 기술 글 읽기·책 읽기.
@@ -20,14 +24,34 @@
 >   `npm run web:preview` = AWS 없이 가짜 데이터로 화면 확인(http://localhost:4173, 비밀번호 `preview`).
 > - 공유 리팩터: 단어 1건 저장을 `src/lib/vocab-capture.ts`(`captureExpression`)로 뺐다 — VocabFn(Telegram)과 WebFn이 같이 쓴다. `입력 경로`에 `Web` 추가.
 > - 검증: `tsc`, 단위테스트 233개(신규 47: missions·web-auth·mirror·web-handler), `cdk synth` + `synth:design` 성공(디자인 stage엔 Web 스택 없음), 미리보기로 5개 화면·복습·영작 흐름 확인.
->   **실제 AWS에서는 아직 한 번도 안 돌았다** (배포 전).
-> - **남은 일 (Prod 머지 후)**:
+>   (배포 전 기준. 배포 후 확인은 위 "배포 확인" 줄.)
+> - **남은 일 (배포됨 — 사용자 확인 대기)**:
 >   1. 비밀번호 정하기 — 배포가 무작위 24자를 넣어 둔다. 바꾸려면
 >      `aws secretsmanager put-secret-value --secret-id hariesse/web-password --secret-string '<8자 이상>' --region ap-northeast-2`
 >      후 WebFn 콜드스타트(설정을 건드리거나 몇 분 대기) — 비밀번호를 바꾸면 기존 로그인은 전부 풀린다.
 >   2. `https://hariesse.nadeliv.com` 접속 → 로그인 → 첫 동기화가 자동으로 돈다(단어장 행 수만큼 몇 초). 기록 탭에서 하루 목표·읽는 책 설정.
 >   3. E2E 확인: 복습 답이 Notion 박스에 반영되는지, 등록한 표현이 Notion에 생기는지, Telegram에서 답한 복습이 동기화 뒤 미션에 잡히는지.
 > - 후속 아이디어: 읽기 탭에서 레슨 본문 보기(지금은 제목+공식 문서 링크만), 독서 기록(책별 진도), Telegram 아침 메시지에 "오늘 미션 n개" 링크, 홈 화면 앱(PWA) 아이콘.
+
+> 🔁 **2026-11-20 다이제스트: 읽음 표시 + 안 읽은 글 재전송 + 최신 글 우선 — develop PR, Prod 미반영.**
+> 발단: ⏭ 건너뛰기를 누르면 "이미 만료된 글이에요". 원인은 버튼이 아니라 **적체 + 수집 기준 TTL**.
+> - 진단(11/20): Articles `status=unread` 813건. curate·deliver가 `status-index`(정렬키 `collectedAt`)를 **오래된 순**으로 200/300건만 봐서,
+>   11/19에 큐레이션된 글이 10/26~27 수집분이었다(23일 지연). TTL은 수집 + 30일이라 전달 후 며칠~몇 시간 만에 삭제 → `getArticle` 없음 → 만료 토스트.
+>   최근 12일 전달 48건 중 테이블에 남은 건 7건, 11/20 아침 다이제스트 4건은 0건. 지워진 글이 피드에 남아 있으면 새 글로 재수집됨(11/7 좋아요 → 11/12 재수집 사례).
+> - 사용자 결정: ① 보냈더라도 **읽음 표시가 없으면 다시 보낸다** ② 읽음 = **아무 버튼이나**(새 `✅ 읽음` 버튼 포함) ③ **읽을 때까지 횟수 제한 없이**, 다이제스트 1회에 1건 ④ Reddit은 뺀다.
+> - 구현: `src/domain/digest.ts`(순수함수 — `isRead`/`pickResends`/`newSlotCount`/TTL). 버튼 `v1|read|<id>` → status `read`, 가중치·관심사 무변동.
+>   `markArticleFeedbackOnce`가 모든 액션에서 `readAt`을 찍는다. deliver: 마지막 전송(`lastSentAt`, 없으면 `deliveredAt`) 후 `RESEND_AFTER_DAYS`=3일 지난 안 읽은 글 중
+>   가장 오래 기다린 `RESEND_PER_DIGEST`=1건을 새 글 뒤에 `🔁 읽음 표시가 없어 다시 보내요`로 붙이고 새 글 자리를 1 줄인다(새 글 최소 1건).
+>   `markDelivered`가 TTL을 **전송 시점 + `DELIVERED_TTL_DAYS`=90일**로 다시 잡고 `lastSentAt`·`sendCount` 갱신(`deliveredAt`은 첫 전달 유지, 지워진 글은 되살리지 않음).
+>   재전송 차례를 기다리는 안 읽은 글은 TTL이 7일 안에 끝나면 deliver가 연장한다. curate·deliver 모두 **최근 수집순**(`listArticlesByStatus(..., newestFirst=true)`).
+>   deliver 로그에 글 ID를 남긴다(이번 진단 때 어떤 글이 나갔는지 알 수 없었음).
+> - 알아둘 점: 최신순으로 바꾸면서 **쌓여 있던 800여 건은 대부분 큐레이션 없이 만료된다**(의도). 배포 전에 전달된 안 읽은 글 7건(11/15~18 전달)은 배포 후 재전송 대상.
+>   `sendCount`는 이번 배포 이후 전송부터 센다.
+> - 운영(11/20, Mac 세션, 사용자 승인): **내 배포 Sources의 Reddit 9개 `status=muted`**(가중치·좋아요 기록 유지, 되돌리려면 `active`). 9개 모두 수집이 `…/top/.rss?t=day -> 404`로
+>   실패 중이었다(원인 미조사). 디자인 stage의 Reddit 2개(r/architecture, r/InteriorDesign)는 건드리지 않음 — 같은 404일 가능성 있음.
+> - 검증: `tsc`, 단위테스트 209개(digest 신규), `cdk synth` 성공. 실제 Telegram 발송·버튼은 배포 후 확인 필요.
+> - **남은 일**: Prod 배포 후 다음 07:00 다이제스트에서 ① 글이 최근 수집분인지 ② `✅ 읽음` 버튼 동작 ③ 3일 뒤 재전송이 오는지 확인.
+>   LinkedIn 연동은 "본 글 링크를 봇에 보내면 요약해 Notion 저장" 방향으로 결정(피드 자동 수집은 공식 API 없음) — 미구현.
 
 > ✍️ **2026-11-13 Writing 교정을 `문장`에 덮어쓰기 — 2026-11-13 배포 완료** (PR #21 → develop af91ddd, Prod PR #22 → 84390d8, Deploy 워크플로 08:04Z 성공, `WritingFn` LastModified 08:04:31Z 확인).
 > 사용자 요청: "문장과 교정을 구분하지 말아줘. 오타는 타이핑 실수니 고쳐서 저장해 달라." → `교정` 칸 폐지.
@@ -37,7 +61,7 @@
 > - **기존 행 마이그레이션 — 2026-11-13 실행 완료(Mac 세션, 사용자 승인)**: `교정`이 채워진 행 26건(전부 오타·문법 수정, 예 "finialized → finalized.", "I'm appreciate → I appreciate your")의
 >   `문장`·`키`를 교정 문장으로 바꾸고 `교정`을 비움. 재실행 dry-run 0건, 샘플 행 확인. 다시 돌릴 일은 없지만 명령은:
 >   `NOTION_TOKEN=$(aws secretsmanager get-secret-value --secret-id hariesse/notion-token --region ap-northeast-2 --query SecretString --output text) WRITING_DB=205a87eb3c20434b896d33213d051501 npx ts-node scripts/migrate-writing-corrections.ts --apply`
->   (`--apply` 없으면 dry-run). Notion의 `교정` 속성은 이제 전부 비어 있으니 지워도 된다(코드는 무관).
+>   (`--apply` 없으면 dry-run). **Notion DB의 `교정` 속성은 2026-11-13 삭제함**(API PATCH `properties.교정=null`, 삭제 전 채워진 행 0건 확인). 코드는 무관.
 > - 검증: `tsc`, 단위테스트 186개(Writing 테스트 갱신), `cdk synth` 성공.
 > - **남은 일**: 다음 12:00 KST 발송(2026-11-14)에서 스포일러에 "내가 쓴 것" 줄이 없는지 확인.
 
