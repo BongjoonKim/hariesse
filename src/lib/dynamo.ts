@@ -108,7 +108,9 @@ export async function putArticleIfNew(table: string, article: Article): Promise<
 export async function listArticlesByStatus(
   table: string,
   status: Article['status'],
-  limit = 100
+  limit = 100,
+  /** true면 최근 수집한 글부터 (status-index 정렬키 = collectedAt). 기본은 오래된 글부터. */
+  newestFirst = false
 ): Promise<Article[]> {
   const res = await doc.send(
     new QueryCommand({
@@ -118,9 +120,53 @@ export async function listArticlesByStatus(
       ExpressionAttributeNames: { '#s': 'status' },
       ExpressionAttributeValues: { ':st': status },
       Limit: limit,
+      ScanIndexForward: !newestFirst,
     })
   );
   return (res.Items ?? []) as Article[];
+}
+
+/**
+ * 전달은 됐지만 status가 아직 unread인 글 전부 (재전송 후보). 읽음 여부는 호출부가 `isRead`로 거른다
+ * — 사이트 좋아요·글감 저장은 status를 바꾸지 않아서 status만으로는 알 수 없다.
+ */
+export async function listDeliveredUnread(table: string): Promise<Article[]> {
+  const items: Article[] = [];
+  let startKey: Record<string, unknown> | undefined;
+  do {
+    const res = await doc.send(
+      new QueryCommand({
+        TableName: table,
+        IndexName: 'status-index',
+        KeyConditionExpression: '#s = :st',
+        FilterExpression: 'attribute_exists(deliveredAt)',
+        ExpressionAttributeNames: { '#s': 'status' },
+        ExpressionAttributeValues: { ':st': 'unread' },
+        ExclusiveStartKey: startKey,
+      })
+    );
+    items.push(...((res.Items ?? []) as Article[]));
+    startKey = res.LastEvaluatedKey;
+  } while (startKey);
+  return items;
+}
+
+/** TTL만 다시 잡는다 (읽지 않은 전달 글이 재전송 차례 전에 지워지지 않게). 이미 지워진 글은 되살리지 않는다. */
+export async function extendArticleTtl(table: string, articleId: string, ttl: number): Promise<void> {
+  try {
+    await doc.send(
+      new UpdateCommand({
+        TableName: table,
+        Key: { articleId },
+        UpdateExpression: 'SET #t = :ttl',
+        ConditionExpression: 'attribute_exists(articleId)',
+        ExpressionAttributeNames: { '#t': 'ttl' },
+        ExpressionAttributeValues: { ':ttl': ttl },
+      })
+    );
+  } catch (err) {
+    if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+  }
 }
 
 export async function saveCuration(
@@ -145,20 +191,34 @@ export async function saveCuration(
   );
 }
 
+/**
+ * 전송 기록 (첫 전달·재전송 공용). deliveredAt은 첫 전달 시각으로 남기고 lastSentAt·sendCount를 갱신한다.
+ * TTL을 전송 시점 기준으로 다시 잡는다 — 수집 기준 TTL 그대로면 늦게 전달된 글이 버튼을 누르기 전에 지워진다.
+ * 그 사이 TTL로 지워진 글은 되살리지 않는다 (ghost 아이템 방지).
+ */
 export async function markDelivered(
   table: string,
   articleId: string,
   slot: Article['slot'],
-  at: string
+  at: string,
+  ttl: number
 ): Promise<void> {
-  await doc.send(
-    new UpdateCommand({
-      TableName: table,
-      Key: { articleId },
-      UpdateExpression: 'SET deliveredAt = :at, slot = :slot',
-      ExpressionAttributeValues: { ':at': at, ':slot': slot },
-    })
-  );
+  try {
+    await doc.send(
+      new UpdateCommand({
+        TableName: table,
+        Key: { articleId },
+        UpdateExpression:
+          'SET deliveredAt = if_not_exists(deliveredAt, :at), lastSentAt = :at, slot = :slot, #t = :ttl ADD sendCount :one',
+        ConditionExpression: 'attribute_exists(articleId)',
+        ExpressionAttributeNames: { '#t': 'ttl' },
+        ExpressionAttributeValues: { ':at': at, ':slot': slot ?? 'exploit', ':ttl': ttl, ':one': 1 },
+      })
+    );
+  } catch (err) {
+    if ((err as { name?: string }).name !== 'ConditionalCheckFailedException') throw err;
+    console.warn(`전달 표시 생략 — 이미 지워진 글 ${articleId}`);
+  }
 }
 
 // ---- Feedback ----
@@ -179,7 +239,8 @@ export async function markArticleFeedbackOnce(
   fields: { status?: ArticleStatus; liked?: boolean; nadelivCandidate?: boolean },
   at: string
 ): Promise<boolean> {
-  const sets = ['#flag = :at'];
+  // 어떤 버튼이든 누르면 읽은 것으로 친다 — readAt이 없고 전달된 글은 재전송 대상 (domain/digest.ts)
+  const sets = ['#flag = :at', 'readAt = if_not_exists(readAt, :at)'];
   const names: Record<string, string> = { '#flag': `${action}FeedbackAt` };
   const values: Record<string, unknown> = { ':at': at };
   if (fields.status !== undefined) {
